@@ -34,7 +34,7 @@ def main(args):
     model = Video2Spot(weights=args.load_weights, input_size=args.feature_dim,
                   num_classes=dataset_Test.num_classes, window_size=args.window_size_spotting, 
                   vlad_k=args.vlad_k,
-                  framerate=args.framerate, pool=args.pool, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).cuda()
+                  framerate=args.framerate, pool=args.pool, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(args.device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -70,10 +70,10 @@ def main(args):
         trainer("spotting", train_loader, val_loader, val_metric_loader, 
                 model, optimizer, scheduler, criterion,
                 model_name=args.model_name,
-                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency)
+                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency, device=args.device)
 
     # For the best model only
-    checkpoint = torch.load(os.path.join("models", args.model_name, "spotting", "model.pth.tar"))
+    checkpoint = torch.load(os.path.join("models", args.model_name, "spotting", "model.pth.tar"), map_location=args.device)
     model.load_state_dict(checkpoint['state_dict'])
 
     # test on multiple splits [test/challenge]
@@ -84,7 +84,7 @@ def main(args):
             batch_size=1, shuffle=False,
             num_workers=1, pin_memory=True)
 
-        results = test_spotting(test_loader, model=model, model_name=args.model_name, NMS_window=args.NMS_window, NMS_threshold=args.NMS_threshold)
+        results = test_spotting(test_loader, model=model, model_name=args.model_name, NMS_window=args.NMS_window, NMS_threshold=args.NMS_threshold, device=args.device)
         if results is None:
             continue
 
@@ -169,10 +169,22 @@ if __name__ == '__main__':
             logging.StreamHandler()
         ])
 
+    # Set device (CPU, CUDA, or MPS)
     if args.GPU >= 0:
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
-
+        if torch.cuda.is_available():
+            os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+            args.device = torch.device(f'cuda:{args.GPU}')
+            logging.info(f"Using CUDA device {args.GPU}")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            args.device = torch.device('mps')
+            logging.info("Using MPS (Apple Silicon GPU)")
+        else:
+            args.device = torch.device('cpu')
+            logging.warning(f"GPU {args.GPU} requested but neither CUDA nor MPS available. Using CPU instead.")
+    else:
+        args.device = torch.device('cpu')
+        logging.info("Using CPU")
 
     start=time.time()
     logging.info('Starting main function')

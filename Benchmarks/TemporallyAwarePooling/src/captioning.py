@@ -39,7 +39,7 @@ def main(args):
                   framerate=args.framerate,
                   pool=args.pool,
                   num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).cuda()
+                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(args.device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -75,12 +75,12 @@ def main(args):
         trainer("caption", train_loader, val_loader, val_metric_loader, 
                 model, optimizer, scheduler, criterion,
                 model_name=args.model_name,
-                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency)
+                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency, device=args.device)
 
     # For the best model only
-    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"))
+    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=args.device)
     model.load_state_dict(checkpoint['state_dict'])
-    model = model.cuda()
+    model = model.to(args.device)
 
     # validate caption generation on groundtruth spots on multiple splits [test/challenge]
     for split in args.split_test:
@@ -98,7 +98,7 @@ def main(args):
             batch_size=args.batch_size, shuffle=False,
             num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
 
-        results = validate_captioning(test_loader, model, args.model_name)
+        results = validate_captioning(test_loader, model, args.model_name, device=args.device)
         if results is None:
             continue
 
@@ -134,7 +134,7 @@ def dvc(args):
                   framerate=args.framerate,
                   pool=args.pool,
                   num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio).cuda()
+                  teacher_forcing_ratio=args.teacher_forcing_ratio).to(args.device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -142,9 +142,9 @@ def dvc(args):
     logging.info("Total number of parameters: " + str(total_params))
 
     # For the best model only
-    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"))
+    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=args.device)
     model.load_state_dict(checkpoint['state_dict'])
-    model = model.cuda()
+    model = model.to(args.device)
 
     # generate dense caption on multiple splits [test/challenge]
     for split in args.split_test:
@@ -155,7 +155,7 @@ def dvc(args):
             batch_size=args.batch_size, shuffle=False,
             num_workers=args.max_num_worker, pin_memory=True)
 
-        results = test_captioning(test_loader, model, args.model_name)
+        results = test_captioning(test_loader, model, args.model_name, device=args.device)
         if results is None:
             continue
 
@@ -256,10 +256,22 @@ if __name__ == '__main__':
             logging.StreamHandler()
         ])
 
+    # Set device (CPU, CUDA, or MPS)
     if args.GPU >= 0:
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
-
+        if torch.cuda.is_available():
+            os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+            args.device = torch.device(f'cuda:{args.GPU}')
+            logging.info(f"Using CUDA device {args.GPU}")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            args.device = torch.device('mps')
+            logging.info("Using MPS (Apple Silicon GPU)")
+        else:
+            args.device = torch.device('cpu')
+            logging.warning(f"GPU {args.GPU} requested but neither CUDA nor MPS available. Using CPU instead.")
+    else:
+        args.device = torch.device('cpu')
+        logging.info("Using CPU")
 
     start=time.time()
     logging.info('Starting main function')

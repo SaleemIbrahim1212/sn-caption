@@ -77,6 +77,7 @@ if __name__ == '__main__':
     run = wandb.init(
     project="DVC-SoccerNet",
     name=args.model_name,
+    entity="salma-nassri-university",
     )
 
     wandb.config.update(args)
@@ -90,10 +91,22 @@ if __name__ == '__main__':
             logging.StreamHandler()
         ])
 
+    # Set device (CPU, CUDA, or MPS)
     if args.GPU >= 0:
-        os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-        os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
-
+        if torch.cuda.is_available():
+            os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
+            os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+            args.device = torch.device(f'cuda:{args.GPU}')
+            logging.info(f"Using CUDA device {args.GPU}")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            args.device = torch.device('mps')
+            logging.info("Using MPS (Apple Silicon GPU)")
+        else:
+            args.device = torch.device('cpu')
+            logging.warning(f"GPU {args.GPU} requested but neither CUDA nor MPS available. Using CPU instead.")
+    else:
+        args.device = torch.device('cpu')
+        logging.info("Using CPU")
 
     start=time.time()
 

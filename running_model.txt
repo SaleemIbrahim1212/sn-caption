@@ -1,0 +1,23 @@
+Inference: 
+
+cd Benchmarks/TemporallyAwarePooling
+source ../../venv38/bin/activate
+
+python src/main.py \
+  --SoccerNet_path=../../data/SoccerNet/caption-2024 \
+  --model_name=baidu-NetVLAD-pretrain-caption \
+  --features=baidu_soccer_embeddings.npy \
+  --framerate=1 \
+  --pool=NetVLAD \
+  --window_size_caption=45 \
+  --window_size_spotting=15 \
+  --NMS_window=30 \
+  --num_layers=4 \
+  --first_stage=caption \
+  --pretrain \
+  --GPU=0 \
+  --test_only \
+  --batch_size=32 \
+  --max_num_worker=1
+  --split_test challenge
+

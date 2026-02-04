@@ -1,0 +1,20 @@
+# SoccerNet dataset download & Dense Video Captioning baseline
+SoccerNet
+
+# Benchmark (TemporallyAwarePooling)
+# Pin versions for compatibility (torchtext requires matching PyTorch version)
+torch==2.1.0
+torchvision==0.16.0
+torchtext==0.16.0
+# Keep numpy<2 for Python 3.8 (numpy 2.x has no wheels for 3.8; spacy's blis needs numpy 1.x on 3.8)
+numpy>=1.19.0,<2.0
+tqdm>=4.60.0
+scikit-learn>=0.24.0
+# spacy 3.7+ pulls blis that requires numpy 2; use 3.6.x for Python 3.8
+spacy>=3.0.0,<3.7
+wandb>=0.12.0
+matplotlib>=3.3.0
+
+# NLG evaluation: install the rest first, then run (with venv38 activated):
+#   bash scripts/install_nlg_eval.sh
+# That script installs patched gensim 3.8.3 + nlg-eval (gensim fails to build from PyPI on Python 3.8+).

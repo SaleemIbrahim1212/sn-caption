@@ -29,7 +29,8 @@ def trainer(phase, train_loader,
             criterion,
             model_name,
             max_epochs=1000,
-            evaluation_frequency=20):
+            evaluation_frequency=20,
+            device=torch.device('cpu')):
 
     logging.info("start training")
 
@@ -41,10 +42,10 @@ def trainer(phase, train_loader,
 
         # train for one epoch
         loss_training = train(phase, train_loader, model, criterion,
-                              optimizer, epoch + 1, train=True)
+                              optimizer, epoch + 1, train=True, device=device)
 
         # evaluate on validation set
-        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False)
+        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, device=device)
 
         state = {
             'epoch': epoch + 1,
@@ -68,7 +69,8 @@ def trainer(phase, train_loader,
             performance_validation = test(
                 val_metric_loader,
                 model,
-                model_name)
+                model_name,
+                device=device)
 
             logging.info("Validation performance at epoch " +
                          str(epoch+1) + " -> " + str(performance_validation))
@@ -100,7 +102,7 @@ def trainer(phase, train_loader,
 
     return
 
-def train(phase, dataloader, model, criterion, optimizer, epoch, train=False):
+def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, device=torch.device('cpu')):
 
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -119,8 +121,8 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False):
             data_time.update(time.time() - end)
             if phase == "spotting":
                 feats, labels = batch
-                feats = feats.cuda()
-                labels = labels.cuda()
+                feats = feats.to(device)
+                labels = labels.to(device)
                 # compute output
                 output = model(feats)
 
@@ -128,13 +130,13 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False):
                 loss = criterion(labels, output)
             elif phase == "caption":
                 (feats, caption), lengths, mask, caption_or, cap_id = batch
-                caption = caption.cuda()
+                caption = caption.to(device)
                 target = caption[:, 1:] #remove SOS token
                 lengths = lengths - 1
                 #pack_padded_sequence to do less computation
                 target = pack_padded_sequence(target, lengths, batch_first=True, enforce_sorted=False)[0]
                 mask = pack_padded_sequence(mask[:, 1:], lengths, batch_first=True, enforce_sorted=False)[0]
-                feats = feats.cuda()
+                feats = feats.to(device)
                 # compute output
                 output = model(feats, caption, lengths)
 
@@ -168,7 +170,7 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False):
 
     return losses.avg
 
-def validate_spotting(dataloader, model, model_name):
+def validate_spotting(dataloader, model, model_name, device=torch.device('cpu')):
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
@@ -181,7 +183,7 @@ def validate_spotting(dataloader, model, model_name):
         for i, (feats, labels) in t:
             # measure data loading time
             data_time.update(time.time() - end)
-            feats = feats.cuda()
+            feats = feats.to(device)
 
             # compute output
             output = model(feats)
@@ -208,7 +210,7 @@ def validate_spotting(dataloader, model, model_name):
 
     return {"mAP-sklearn" : mAP}
 
-def test_spotting(dataloader, model, model_name, save_predictions=True, NMS_window=30, NMS_threshold=0.5):
+def test_spotting(dataloader, model, model_name, save_predictions=True, NMS_window=30, NMS_threshold=0.5, device=torch.device('cpu')):
     
     split = '_'.join(dataloader.dataset.split)
     output_folder = f"outputs/{split}"
@@ -241,7 +243,7 @@ def test_spotting(dataloader, model, model_name, save_predictions=True, NMS_wind
                 start_frame = BS*b
                 end_frame = BS*(b+1) if BS * \
                     (b+1) < len(feat_half1) else len(feat_half1)
-                feat = feat_half1[start_frame:end_frame].cuda()
+                feat = feat_half1[start_frame:end_frame].to(device)
                 output = model(feat).cpu().detach().numpy()
                 timestamp_long_half_1.append(output)
             timestamp_long_half_1 = np.concatenate(timestamp_long_half_1)
@@ -251,7 +253,7 @@ def test_spotting(dataloader, model, model_name, save_predictions=True, NMS_wind
                 start_frame = BS*b
                 end_frame = BS*(b+1) if BS * \
                     (b+1) < len(feat_half2) else len(feat_half2)
-                feat = feat_half2[start_frame:end_frame].cuda()
+                feat = feat_half2[start_frame:end_frame].to(device)
                 output = model(feat).cpu().detach().numpy()
                 timestamp_long_half_2.append(output)
             timestamp_long_half_2 = np.concatenate(timestamp_long_half_2)
@@ -360,7 +362,7 @@ def test_spotting(dataloader, model, model_name, save_predictions=True, NMS_wind
 
     return results
 
-def validate_captioning(dataloader, model, model_name):
+def validate_captioning(dataloader, model, model_name, device=torch.device('cpu')):
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
@@ -374,7 +376,7 @@ def validate_captioning(dataloader, model, model_name):
         for (feats, caption), lengths, mask, caption_or, cap_id in t:
             # measure data loading time
             data_time.update(time.time() - end)
-            feats = feats.cuda()
+            feats = feats.to(device)
             #compute output string
             output = [dataloader.dataset.detokenize(list(model.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
             
@@ -394,7 +396,7 @@ def validate_captioning(dataloader, model, model_name):
     scores = caption_scorer.compute_metrics(ref_list=[all_labels,], hyp_list=all_outputs)
     return scores
 
-def test_captioning(dataloader, model, model_name, output_filename = "results_dense_captioning.json", input_filename="results_spotting.json"):
+def test_captioning(dataloader, model, model_name, output_filename = "results_dense_captioning.json", input_filename="results_spotting.json", device=torch.device('cpu')):
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
@@ -412,7 +414,7 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
         for feats, game_id, cap_id in t:
             # measure data loading time
             data_time.update(time.time() - end)
-            feats = feats.cuda()
+            feats = feats.to(device)
             output = [dataloader.dataset.detokenize(list(model.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
             
             all_outputs.extend(output)
