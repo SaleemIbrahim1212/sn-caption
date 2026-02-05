@@ -13,12 +13,18 @@ from SoccerNet.Evaluation.utils import AverageMeter, getMetaDataTask
 import glob
 from utils import evaluate as evaluate_spotting
 from SoccerNet.Evaluation.DenseVideoCaptioning import evaluate as evaluate_dvc
-from nlgeval import NLGEval
+try:
+    from nlgeval import NLGEval
+except Exception:
+    NLGEval = None
 from torch.nn.utils.rnn import pack_padded_sequence
 
 import wandb
 
-caption_scorer = NLGEval(no_glove=True, no_skipthoughts=True)
+caption_scorer = NLGEval(no_glove=True, no_skipthoughts=True) if NLGEval is not None else None
+if caption_scorer is not None and hasattr(caption_scorer, "scorers"):
+    # Disable SPICE to avoid Java/CoreNLP dependency issues.
+    caption_scorer.scorers = [s for s in caption_scorer.scorers if s[1] != "SPICE"]
 
 def trainer(phase, train_loader,
             val_loader,
@@ -361,6 +367,8 @@ def test_spotting(dataloader, model, model_name, save_predictions=True, NMS_wind
     return results
 
 def validate_captioning(dataloader, model, model_name):
+    if caption_scorer is None:
+        raise ImportError("nlgeval is required for caption validation. Install it or skip captioning evaluation.")
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
@@ -456,8 +464,12 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
         print("Visit eval.ai to evalaute performances on Challenge set")
         return None
     
-    tight = evaluate_dvc(SoccerNet_path=dataloader.dataset.path, Predictions_path=output_results, split=dataloader.dataset.split, version=dataloader.dataset.version, prediction_file=output_filename, window_size=5, include_SODA=False)
-    loose = evaluate_dvc(SoccerNet_path=dataloader.dataset.path, Predictions_path=output_results, split=dataloader.dataset.split, version=dataloader.dataset.version, prediction_file=output_filename, window_size=30, include_SODA=False)
+    # On Windows, SoccerNet's zip reader can fail due to path separator mismatch.
+    # Evaluate from folder structure instead of the zip archive.
+    eval_predictions_path = os.path.join("models", model_name, output_folder) if os.name == "nt" else output_results
+
+    tight = evaluate_dvc(SoccerNet_path=dataloader.dataset.path, Predictions_path=eval_predictions_path, split=dataloader.dataset.split, version=dataloader.dataset.version, prediction_file=output_filename, window_size=5, include_SODA=False)
+    loose = evaluate_dvc(SoccerNet_path=dataloader.dataset.path, Predictions_path=eval_predictions_path, split=dataloader.dataset.split, version=dataloader.dataset.version, prediction_file=output_filename, window_size=30, include_SODA=False)
 
     results = {**{f"{k}_tight" : v for k, v in tight.items()}, **{f"{k}_loose" : v for k, v in loose.items()}}
 

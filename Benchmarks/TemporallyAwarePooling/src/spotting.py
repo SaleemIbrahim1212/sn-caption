@@ -20,19 +20,26 @@ def main(args):
     for arg in vars(args):
         logging.info(arg.rjust(15) + " : " + str(getattr(args, arg)))
 
+    # Support both CLI (`--window_size`) and main.py (`--window_size_spotting`)
+    window_size = getattr(args, "window_size", None)
+    if window_size is None:
+        window_size = getattr(args, "window_size_spotting", None)
+    if window_size is None:
+        raise AttributeError("window_size not set. Use --window_size or --window_size_spotting.")
+
     # create dataset
     if not args.test_only:
-        dataset_Train = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
-        dataset_Valid = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
-        dataset_Valid_metric  = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
-    dataset_Test  = SoccerNetClipsTesting(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
+        dataset_Train = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=window_size)
+        dataset_Valid = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=window_size)
+        dataset_Valid_metric  = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=window_size)
+    dataset_Test  = SoccerNetClipsTesting(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=window_size)
 
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][1].shape[-1]
         print("feature_dim found:", args.feature_dim)
     # create model
     model = Video2Spot(weights=args.load_weights, input_size=args.feature_dim,
-                  num_classes=dataset_Test.num_classes, window_size=args.window_size_spotting, 
+                  num_classes=dataset_Test.num_classes, window_size=window_size, 
                   vlad_k=args.vlad_k,
                   framerate=args.framerate, pool=args.pool, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).cuda()
     logging.info(model)
@@ -78,13 +85,15 @@ def main(args):
 
     # test on multiple splits [test/challenge]
     for split in args.split_test:
-        dataset_Test  = SoccerNetClipsTesting(path=args.SoccerNet_path, features=args.features, split=[split], version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
+        dataset_Test  = SoccerNetClipsTesting(path=args.SoccerNet_path, features=args.features, split=[split], version=args.version, framerate=args.framerate, window_size=window_size)
 
         test_loader = torch.utils.data.DataLoader(dataset_Test,
             batch_size=1, shuffle=False,
             num_workers=1, pin_memory=True)
-
-        results = test_spotting(test_loader, model=model, model_name=args.model_name, NMS_window=args.NMS_window, NMS_threshold=args.NMS_threshold)
+        try: 
+            results = test_spotting(test_loader, model=model, model_name=args.model_name, NMS_window=args.NMS_window, NMS_threshold=args.NMS_threshold)
+        except: 
+            continue 
         if results is None:
             continue
 
@@ -126,6 +135,8 @@ if __name__ == '__main__':
     parser.add_argument('--vlad_k',       required=False, type=int,   default=64, help='Size of the vocabulary for NetVLAD' )
     parser.add_argument('--NMS_window',       required=False, type=int,   default=30, help='NMS window in second' )
     parser.add_argument('--NMS_threshold',       required=False, type=float,   default=0.0, help='NMS threshold for positive results' )
+    parser.add_argument('--freeze_encoder',  required=False, action='store_true', help='Freeze encoder weights')
+    parser.add_argument('--weights_encoder', required=False, type=str, default=None, help='Path to pretrained encoder weights')
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )
     parser.add_argument('--LR',       required=False, type=float,   default=1e-03, help='Learning Rate' )

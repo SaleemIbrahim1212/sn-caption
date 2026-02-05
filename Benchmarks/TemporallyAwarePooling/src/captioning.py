@@ -98,7 +98,11 @@ def main(args):
             batch_size=args.batch_size, shuffle=False,
             num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
 
-        results = validate_captioning(test_loader, model, args.model_name)
+        try:
+            results = validate_captioning(test_loader, model, args.model_name)
+        except ImportError as e:
+            logging.warning(f"Skipping caption validation: {e}")
+            continue
         if results is None:
             continue
 
