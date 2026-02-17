@@ -17,7 +17,7 @@ python src/main.py \
   --pretrain \
   --GPU=0 \
   --test_only \
-  --batch_size=32 \
-  --max_num_worker=1
-  --split_test challenge
+  --batch_size=16 \
+  --max_num_worker=0 \
+  --split_test test
 

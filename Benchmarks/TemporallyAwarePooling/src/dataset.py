@@ -389,9 +389,14 @@ class SoccerNetTextProcessor(object):
         spacy_token.add_special_case("[TEAM]", [{"ORTH": "[TEAM]"}])
         spacy_token.add_special_case("([TEAM])", [{"ORTH": "([TEAM])"}])
         spacy_token.add_special_case("[REFEREE]", [{"ORTH": "[REFEREE]"}])
-        self.tokenizer = lambda s: [c.text for c in spacy_token(s)]
+        # self.tokenizer = lambda s: [c.text for c in spacy_token(s)]
+        self.spacy_token = spacy_token
         self.min_freq = min_freq
         self.build_vocab(corpus)
+    
+    def tokenizer(self, s):
+        """Tokenize a string using spaCy. This method is picklable for multiprocessing."""
+        return [c.text for c in self.spacy_token(s)]
     
     def build_vocab(self, corpus):
         counter = Counter([token for c in corpus for token in self.tokenizer(c)])
