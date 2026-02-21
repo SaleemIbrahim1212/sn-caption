@@ -21,3 +21,24 @@ python src/main.py \
   --max_num_worker=0 \
   --split_test test
 
+
+
+Train with transformer captioning model:
+
+python src/main.py \
+  --SoccerNet_path=../../data/SoccerNet/caption-2024 \
+  --model_name=transformer-caption \
+  --features=baidu_soccer_embeddings.npy \
+  --framerate 1 \
+  --pool=NetVLAD \
+  --window_size_caption=45 \
+  --window_size_spotting=15 \
+  --NMS_window=30 \
+  --num_layers=4 \
+  --first_stage=caption \
+  --pretrain \
+  --GPU=0 \
+  --use_transformer_caption \
+  --batch_size=4 \
+  --max_num_worker=0 \
+  --split_test test
