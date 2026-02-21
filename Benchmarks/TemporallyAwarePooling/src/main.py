@@ -47,7 +47,13 @@ if __name__ == '__main__':
     parser.add_argument('--pretrain',   required=False, action='store_true',  help='Perform testing only' )
     parser.add_argument('--weights_encoder',  required=False, type=str, default=None)
     parser.add_argument('--num_layers',  required=False, type=int, default=2)
-    
+
+    ### New section: Captioning: transformer aggregator + late fusion (for future audio)
+    parser.add_argument('--use_transformer_caption',  required=False, action='store_true', help='Use transformer aggregator + late fusion instead of NetVLAD for captioning')
+    parser.add_argument('--audio_embed_dim',  required=False, type=int, default=0, help='Audio embedding dim (0 = video only until audio is available)')
+    parser.add_argument('--caption_d_model',  required=False, type=int, default=256, help='Transformer d_model for caption encoder')
+    parser.add_argument('--caption_nhead',  required=False, type=int, default=8, help='Transformer nhead for caption encoder')
+    parser.add_argument('--caption_num_encoder_layers',  required=False, type=int, default=2, help='Number of transformer encoder layers for captioning')
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )
     parser.add_argument('--LR',       required=False, type=float,   default=1e-03, help='Learning Rate' )

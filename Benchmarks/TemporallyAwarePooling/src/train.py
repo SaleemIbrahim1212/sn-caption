@@ -138,7 +138,11 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, de
                 mask = pack_padded_sequence(mask[:, 1:], lengths, batch_first=True, enforce_sorted=False)[0]
                 feats = feats.to(device)
                 # compute output
-                output = model(feats, caption, lengths)
+                # output = model(feats, caption, lengths)
+                
+                # compute output (audio_embeddings=None until dataset provides them)
+                audio = batch[0][2] if len(batch[0]) > 2 else None
+                output = model(feats, caption, lengths, audio_embeddings=audio)
 
                 loss = criterion(output[mask], target[mask])
             else:

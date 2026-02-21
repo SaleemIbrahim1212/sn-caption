@@ -8,7 +8,7 @@ from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 import torch
 
 from dataset import SoccerNetCaptions, PredictionCaptions, collate_fn_padd
-from model import Video2Caption
+from model import Video2Caption, Video2CaptionWithTransformer
 from train import trainer, test_captioning, validate_captioning
 
 from utils import valid_probability
@@ -32,14 +32,30 @@ def main(args):
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][0].shape[-1]
         print("feature_dim found:", args.feature_dim)
-    # create model
-    model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
-                  window_size=args.window_size_caption, 
-                  vlad_k = args.vlad_k,
-                  framerate=args.framerate,
-                  pool=args.pool,
-                  num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(args.device)
+    # create model (transformer + late fusion for caption, or original NetVLAD-based)
+    if getattr(args, 'use_transformer_caption', False):
+        model = Video2CaptionWithTransformer(
+            vocab_size=dataset_Test.vocab_size,
+            weights=args.load_weights,
+            input_size=args.feature_dim,
+            window_size=args.window_size_caption,
+            framerate=args.framerate,
+            d_model=getattr(args, 'caption_d_model', 256),
+            nhead=getattr(args, 'caption_nhead', 8),
+            num_encoder_layers=getattr(args, 'caption_num_encoder_layers', 2),
+            audio_embed_dim=getattr(args, 'audio_embed_dim', 0),
+            num_layers=args.num_layers,
+            teacher_forcing_ratio=args.teacher_forcing_ratio,
+            freeze_encoder=args.freeze_encoder,
+        ).to(args.device)
+    else:
+        model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
+                      window_size=args.window_size_caption,
+                      vlad_k=args.vlad_k,
+                      framerate=args.framerate,
+                      pool=args.pool,
+                      num_layers=args.num_layers,
+                      teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(args.device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -127,14 +143,39 @@ def dvc(args):
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][0].shape[-1]
         print("feature_dim found:", args.feature_dim)
-    # create model
-    model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
-                  window_size=args.window_size_caption, 
-                  vlad_k = args.vlad_k,
-                  framerate=args.framerate,
-                  pool=args.pool,
-                  num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio).to(args.device)
+
+    #  model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
+    #               window_size=args.window_size_caption, 
+    #               vlad_k = args.vlad_k,
+    #               framerate=args.framerate,
+    #               pool=args.pool,
+    #               num_layers=args.num_layers,
+    #               teacher_forcing_ratio=args.teacher
+
+    
+    # create model (same architecture as in main())
+    if getattr(args, 'use_transformer_caption', False):
+        model = Video2CaptionWithTransformer(
+            vocab_size=dataset_Test.vocab_size,
+            weights=args.load_weights,
+            input_size=args.feature_dim,
+            window_size=args.window_size_caption,
+            framerate=args.framerate,
+            d_model=getattr(args, 'caption_d_model', 256),
+            nhead=getattr(args, 'caption_nhead', 8),
+            num_encoder_layers=getattr(args, 'caption_num_encoder_layers', 2),
+            audio_embed_dim=getattr(args, 'audio_embed_dim', 0),
+            num_layers=args.num_layers,
+            teacher_forcing_ratio=args.teacher_forcing_ratio,
+        ).to(args.device)
+    else:
+        model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
+                      window_size=args.window_size_caption,
+                      vlad_k=args.vlad_k,
+                      framerate=args.framerate,
+                      pool=args.pool,
+                      num_layers=args.num_layers,
+                      teacher_forcing_ratio=args.teacher_forcing_ratio).to(args.device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)

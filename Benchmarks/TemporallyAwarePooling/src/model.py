@@ -11,6 +11,91 @@ from netvlad import NetVLAD, NetRVLAD
 from dataset import SOS_TOKEN, EOS_TOKEN
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 import random
+import math
+
+### New sections: Positional encoding + Transformer aggregator + Late fusion
+class PositionalEncoding(nn.Module):
+    """Sinusoidal positional encoding for transformer."""
+
+    def __init__(self, d_model, max_len=5000, dropout=0.1):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0)  # (1, max_len, d_model)
+        self.register_buffer("pe", pe)
+
+    def forward(self, x):
+        # x: (B, T, d_model)
+        x = x + self.pe[:, : x.size(1), :]
+        return self.dropout(x)
+
+
+class TransformerAggregator(nn.Module):
+    """
+    Replaces the pooling aggregator (e.g. NetVLAD) with a transformer encoder.
+    INPUT:  (batch_size, seq_len, input_size)
+    OUTPUT: (batch_size, d_model)  [mean-pooled over time]
+    """
+
+    def __init__(
+        self,
+        input_size=512,
+        d_model=256,
+        nhead=8,
+        num_encoder_layers=2,
+        dim_feedforward=512,
+        dropout=0.1,
+    ):
+        super(TransformerAggregator, self).__init__()
+        self.d_model = d_model
+        self.input_proj = nn.Linear(input_size, d_model) if input_size != d_model else nn.Identity()
+        self.pos_encoder = PositionalEncoding(d_model, dropout=dropout)
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=dim_feedforward,
+            dropout=dropout,
+            activation="relu",
+            batch_first=True,
+            norm_first=False,
+        )
+        self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+
+    def forward(self, x):
+        # x: (B, T, input_size)
+        x = self.input_proj(x)  # (B, T, d_model)
+        x = self.pos_encoder(x)
+        x = self.transformer_encoder(x)  # (B, T, d_model)
+        x = x.mean(dim=1)  # (B, d_model)
+        return x
+
+
+class LateFusion(nn.Module):
+    """
+    Late fusion of video and (optional) audio embeddings.
+    When audio_embeddings is None, only video is projected to hidden_size.
+    When provided, video and audio are concatenated then projected.
+    """
+
+    def __init__(self, video_dim, hidden_size, audio_dim=0):
+        super(LateFusion, self).__init__()
+        self.audio_dim = audio_dim
+        if audio_dim > 0:
+            self.fusion = nn.Linear(video_dim + audio_dim, hidden_size)
+        else:
+            self.fusion = nn.Linear(video_dim, hidden_size)
+
+    def forward(self, video_enc, audio_enc=None):
+        # video_enc: (B, video_dim), audio_enc: (B, audio_dim) or None
+        if audio_enc is None or self.audio_dim == 0:
+            return self.fusion(video_enc)
+        fused = torch.cat([video_enc, audio_enc], dim=-1)
+        return self.fusion(fused)
+
 
 class VideoEncoder(nn.Module):
     def __init__(self, input_size=512, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD"):
@@ -195,7 +280,8 @@ class Video2Caption(nn.Module):
                 for param in self.encoder.parameters():
                     param.requires_grad = False
     
-    def forward(self, features, captions, lengths):
+    def forward(self, features, captions, lengths, audio_embeddings=None):
+        # audio_embeddings ignored (kept for API compatibility with Video2CaptionWithTransformer)
         features = self.encoder(features)
         batch_size = captions.size(0)
         captions = captions[:, :-1]  # Remove last word in caption to use as input
@@ -220,6 +306,103 @@ class Video2Caption(nn.Module):
     def sample(self, features, max_seq_length=70):
         features = self.encoder(features.unsqueeze(0))
         return self.decoder.sample(features, max_seq_length)
+
+
+### New section: Transformer for captioning
+class Video2CaptionWithTransformer(nn.Module):
+    """
+    Captioning model that uses a transformer aggregator (instead of NetVLAD/etc.)
+    and late fusion for optional audio embeddings, then LSTM decoder.
+    Spotting sub-module is unchanged (still uses Video2Spot with VideoEncoder).
+    """
+
+    def __init__(
+        self,
+        vocab_size,
+        weights=None,
+        input_size=512,
+        window_size=15,
+        framerate=2,
+        # Transformer aggregator
+        d_model=256,
+        nhead=8,
+        num_encoder_layers=2,
+        dim_feedforward=512,
+        encoder_dropout=0.1,
+        # Late fusion (audio_embed_dim=0 means video-only for now)
+        audio_embed_dim=0,
+        # Decoder (same as original)
+        embed_size=256,
+        hidden_size=512,
+        teacher_forcing_ratio=1,
+        num_layers=2,
+        max_seq_length=50,
+        freeze_encoder=False,
+    ):
+        super(Video2CaptionWithTransformer, self).__init__()
+        self.video_aggregator = TransformerAggregator(
+            input_size=input_size,
+            d_model=d_model,
+            nhead=nhead,
+            num_encoder_layers=num_encoder_layers,
+            dim_feedforward=dim_feedforward,
+            dropout=encoder_dropout,
+        )
+        self.fusion = LateFusion(
+            video_dim=d_model,
+            hidden_size=hidden_size,
+            audio_dim=audio_embed_dim,
+        )
+        self.decoder = DecoderRNN(hidden_size, embed_size, hidden_size, vocab_size, num_layers)
+        self.vocab_size = vocab_size
+        self.teacher_forcing_ratio = teacher_forcing_ratio
+
+        if freeze_encoder:
+            for param in self.video_aggregator.parameters():
+                param.requires_grad = False
+
+        self.load_weights(weights=weights)
+
+    def load_weights(self, weights=None):
+        if weights is not None:
+            print("=> loading checkpoint '{}'".format(weights))
+            checkpoint = torch.load(weights, map_location="cpu")
+            self.load_state_dict(checkpoint["state_dict"], strict=False)
+            print("=> loaded checkpoint '{}' (epoch {})".format(weights, checkpoint["epoch"]))
+
+    def _encode(self, video_features, audio_embeddings=None):
+        video_enc = self.video_aggregator(video_features)  # (B, d_model)
+        fused = self.fusion(video_enc, audio_embeddings)    # (B, hidden_size)
+        return fused
+
+    def forward(self, features, captions, lengths, audio_embeddings=None):
+        fused = self._encode(features, audio_embeddings)
+        batch_size = captions.size(0)
+        captions = captions[:, :-1]
+        use_teacher_forcing = random.random() < self.teacher_forcing_ratio
+        if use_teacher_forcing:
+            decoder_input = captions
+            decoder_output = self.decoder(fused, decoder_input, lengths)
+        else:
+            decoder_input = captions[:, 0].unsqueeze(1)
+            decoder_output = torch.zeros(
+                batch_size, captions.size(1), self.vocab_size, device=captions.device
+            )
+            for t in range(captions.size(1)):
+                decoder_output_t = self.decoder(fused, decoder_input, torch.ones_like(lengths))
+                decoder_output[:, t, :] = decoder_output_t
+                _, topi = decoder_output_t.topk(1)
+                decoder_input = topi.detach()
+            decoder_output = pack_padded_sequence(
+                decoder_output, lengths, batch_first=True, enforce_sorted=False
+            )[0]
+        return decoder_output
+
+    def sample(self, features, max_seq_length=70, audio_embeddings=None):
+        if features.dim() == 2:
+            features = features.unsqueeze(0)
+        fused = self._encode(features, audio_embeddings)
+        return self.decoder.sample(fused, max_seq_length)
 
 class Video2Spot(nn.Module):
     def __init__(self, weights=None, input_size=512, num_classes=17, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD", weights_encoder=None, freeze_encoder=False):
