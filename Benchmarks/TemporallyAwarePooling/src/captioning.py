@@ -22,8 +22,27 @@ def resolve_device(args):
     return torch.device("cpu")
 
 
+def resolve_caption_pool(args):
+    caption_type = str(getattr(args, "caption_type", "baseline")).strip().lower()
+    if caption_type != "transformer":
+        return args.pool
+
+    modality = str(getattr(args, "transformer_modality", "video")).strip().lower()
+    modality_to_pool = {
+        "video": "Transformer_Video",
+        "audio": "Transformer_Audio",
+        "both": "Transformer",
+    }
+    if modality not in modality_to_pool:
+        raise ValueError(
+            f"Incorrect modality --transformer_modality='{modality}'. "
+        )
+    return modality_to_pool[modality]
+
+
 def main(args):
     device = resolve_device(args)
+    caption_pool = resolve_caption_pool(args)
 
     logging.info("Parameters:")
     for arg in vars(args):
@@ -41,11 +60,11 @@ def main(args):
         print("feature_dim found:", args.feature_dim)
     # create model
 
-    if args.caption_type == 'Transformer':
+    if str(args.caption_type).strip().lower() == "transformer":
         model = SoccerNetTransformerCaption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                   window_size=args.window_size_caption, 
                   framerate=args.framerate,
-                  pool=args.pool,
+                  pool=caption_pool,
                   num_layers=args.num_layers,
                   teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
     else:
@@ -139,6 +158,7 @@ def main(args):
 
 def dvc(args):
     device = resolve_device(args)
+    caption_pool = resolve_caption_pool(args)
 
     logging.info("Parameters:")
     for arg in vars(args):
@@ -151,11 +171,11 @@ def dvc(args):
         print("feature_dim found:", args.feature_dim)
     # create model
 
-    if args.caption_type == "Transformer":
+    if str(args.caption_type).strip().lower() == "transformer":
         model = SoccerNetTransformerCaption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                   window_size=args.window_size_caption, 
                   framerate=args.framerate,
-                  pool=args.pool,
+                  pool=caption_pool,
                   num_layers=args.num_layers,
                   teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
     else: 
@@ -235,7 +255,8 @@ if __name__ == '__main__':
     parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Number of chunks per epoch' )
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )
     parser.add_argument('--window_size_caption', required=False, type=int,   default=15,     help='Size of the chunk (in seconds)' )
-    parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool' )
+    parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool for non-transformer captioning' )
+    parser.add_argument('--transformer_modality', required=False, type=str, choices=["video", "audio", "both"], default="video", help='Transformer modality to run when --caption_type=Transformer' )
     parser.add_argument('--vlad_k',       required=False, type=int,   default=64, help='Size of the vocabulary for NetVLAD' )
     parser.add_argument('--min_freq',       required=False, type=int,   default=5, help='Minimum word frequency to the vocabulary for caption generation' )
     
@@ -255,7 +276,7 @@ if __name__ == '__main__':
     parser.add_argument('--device',     required=False, type=str,   default=None,   help='torch device (e.g., cpu, cuda, cuda:0)' )
     parser.add_argument('--max_num_worker',   required=False, type=int,   default=4, help='number of worker to load data')
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
-    #parser.add_argument('--caption_type',   required=True, type=str,   default='INFO', help='Transformer based Aggregator System/ Boring Aggregator')
+    parser.add_argument('--caption_type',   required=False, type=str, choices=['Transformer', 'Baseline', 'transformer', 'baseline'], default='Baseline', help='Caption model type')
 
     parser.add_argument('--loglevel',   required=False, type=str,   default='INFO', help='logging level')
 

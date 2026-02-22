@@ -137,9 +137,9 @@ class MultimodalTransformerCaption(nn.Module):
 
         # are feature alread PCA'ed?
         if not self.input_size == 512:   
-            self.feature_extractor = nn.Linear(self.input_size, 512)
-            input_size = 512
-            self.input_size = 512
+            self.feature_extractor = nn.Linear(self.input_size, 256)
+            input_size = 256
+            self.input_size = 256
         
         if self.pool == "Transformer_Video":
             self.pooling_layer = Transformer_Video(video_feat_dim=self.input_size, video_d_model=self.input_size, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame)
@@ -154,10 +154,10 @@ class MultimodalTransformerCaption(nn.Module):
              self.pooling_layer = Transformer(video_feat_dim=self.input_size, video_d_model=self.input_size, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame , audio_feat_dim=self.input_size, audio_d_model=self.input_size, audio_nhead=2, audio_num_layers=2, audio_length=self.window_size_frame)
              self.hidden_size = self.input_size  * 2 
     def forward(self, audio_feats=None, video_feats=None):
-        if audio_feats ==None and video_feats==None:
+        if audio_feats is None and video_feats is None:
             raise NotImplementedError
         
-        if (video_feats is not None and  audio_feats is None ):
+        elif (video_feats is not None and  audio_feats is None ):
             '''If we only have video features '''
             BS, FR, IC = video_feats.shape
             if not IC == 512:
@@ -194,7 +194,7 @@ class MultimodalTransformerCaption(nn.Module):
                 audio_feats = audio_feats.reshape(BS_audio*FR_audio, IC_audio)
                 audio_feats = self.feature_extractor(audio_feats)
                 audio_feats= audio_feats.reshape(BS_vid, FR_vid, -1)
-            cls_audio_token, cls_video_token = self.pooling_layer(video_feats, audio_feats)
+            cls_audio_token, cls_video_token = self.pooling_layer(audio_feats, video_feats )
             final_token  = torch.concat([cls_audio_token, cls_video_token], dim=1)
             return final_token
         
@@ -311,11 +311,11 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=128, hidden_size=256, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(input_size, window_size, framerate, pool)
         self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size, hidden_size, vocab_size, num_layers)
-        self.load_weights(weights=weights)
+        #self.load_weights(weights=weights)
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
         self.vocab_size = vocab_size
         self.teacher_forcing_ratio = teacher_forcing_ratio
@@ -338,10 +338,10 @@ class SoccerNetTransformerCaption(nn.Module):
             features = self.encoder(features_video)
         elif (self.encoder.pool == "Transformer_Audio"):
             '''get the cls token just for the audio'''
-            features = self.encoder(features_audio)
+            features = self.encoder( features_audio)
         else:
             '''get the cls token for the combined versions'''
-            features = self.encoder(features_video, features_audio)
+            features = self.encoder(features_audio , features_video )
         batch_size = captions.size(0)
         captions = captions[:, :-1]  # Remove last word in caption to use as input
         use_teacher_forcing = random.random() < self.teacher_forcing_ratio
@@ -368,7 +368,7 @@ class SoccerNetTransformerCaption(nn.Module):
         elif (self.encoder.pool == "Transformer_Audio"):
             features = self.encoder(features_audio.unsqueeze(0))
         else:
-            features = self.encoder(features_video.unsqueeze(0), features_audio.unsqueeze(0))
+            features = self.encoder(video_feats= features_video.unsqueeze(0), audio_feats = features_audio.unsqueeze(0))
 
         return self.decoder.sample(features, max_seq_length)
  

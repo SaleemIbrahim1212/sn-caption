@@ -148,7 +148,7 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False):
                     output = model(feats, None, caption, lengths)  # video-only transformer path
                 elif hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer_Audio"):
                     raise NotImplementedError #Audio only Transformer 
-                if hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer"):
+                elif hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer"):
                     raise NotImplementedError #Both Audio and Video Trasnformer
                 else:
                     output = model(feats, caption, lengths)
