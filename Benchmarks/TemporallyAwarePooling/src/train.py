@@ -143,7 +143,15 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False):
                 mask = pack_padded_sequence(mask[:, 1:], lengths, batch_first=True, enforce_sorted=False)[0]
                 feats = feats.to(device)
                 # compute output
-                output = model(feats,None,caption, lengths) #TODO: Have this working with audio/video, the code is already there, for now this just works with video
+                #TODO: Need to adjust the code for audio as well
+                if hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer_Video"):
+                    output = model(feats, None, caption, lengths)  # video-only transformer path
+                elif hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer_Audio"):
+                    raise NotImplementedError #Audio only Transformer 
+                if hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer"):
+                    raise NotImplementedError #Both Audio and Video Trasnformer
+                else:
+                    output = model(feats, caption, lengths)
 
                 loss = criterion(output[mask], target[mask])
             else:
@@ -389,7 +397,14 @@ def validate_captioning(dataloader, model, model_name):
             feats = feats.to(device)
             #compute output string
             #TODO: Right now this is just configured to work with Video, we need to add the audio modality as well 
-            output = [dataloader.dataset.detokenize(list(model.sample(feats[idx], None).detach().cpu())) for idx in range(feats.shape[0])]
+            if hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer_Video"):
+                output = [dataloader.dataset.detokenize(list(model.sample(feats[idx], None).detach().cpu())) for idx in range(feats.shape[0])]
+            elif hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer_Audio"):
+                raise NotImplementedError
+            elif hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer"):
+                raise NotImplementedError    
+            else:
+                output = [dataloader.dataset.detokenize(list(model.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
             
             all_outputs.extend(output)
             all_labels.extend(caption_or)
@@ -427,7 +442,12 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
             # measure data loading time
             data_time.update(time.time() - end)
             feats = feats.to(device)
-            output = [dataloader.dataset.detokenize(list(model.sample(feats[idx], None).detach().cpu())) for idx in range(feats.shape[0])]
+
+            #TODO: Audio needs to be considered here 
+            if hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer"):
+                output = [dataloader.dataset.detokenize(list(model.sample(feats[idx], None).detach().cpu())) for idx in range(feats.shape[0])]
+            else:
+                output = [dataloader.dataset.detokenize(list(model.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
             
             all_outputs.extend(output)
             all_index.extend([(i.item(), j.item()) for i, j in zip(game_id, cap_id)])

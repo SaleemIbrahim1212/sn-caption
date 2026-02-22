@@ -255,7 +255,7 @@ if __name__ == '__main__':
     parser.add_argument('--device',     required=False, type=str,   default=None,   help='torch device (e.g., cpu, cuda, cuda:0)' )
     parser.add_argument('--max_num_worker',   required=False, type=int,   default=4, help='number of worker to load data')
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
-    parser.add_argument('--caption_type',   required=True, type=str,   default='INFO', help='Transformer based Aggregator System/ Boring Aggregator')
+    #parser.add_argument('--caption_type',   required=True, type=str,   default='INFO', help='Transformer based Aggregator System/ Boring Aggregator')
 
     parser.add_argument('--loglevel',   required=False, type=str,   default='INFO', help='logging level')
 

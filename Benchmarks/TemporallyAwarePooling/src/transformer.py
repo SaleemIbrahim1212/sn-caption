@@ -52,14 +52,14 @@ class Transformer(nn.Module):
 
         batch_audio, _ , _ = audio_feats.shape
         batch_video, _, _ = video_feats.shape 
-        x = self.audio_proj(audio_feats) + self.embedding_audio(torch.arange(self.audio_length)) 
+        x = self.audio_proj(audio_feats) + self.embedding_audio(torch.arange(self.audio_length, device=audio_feats.device)) 
         cls_aud = self.cls_audio.expand(batch_audio, -1, -1) 
         x = torch.concat([cls_aud, x], dim=1 )
         x  = self.audio_transformer(x) 
         audio_token  = x[:,0, :]
 
 
-        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(self.video_length)) 
+        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(self.video_length, device=video_feats.device)) 
         cls_video = self.cls_video.expand(batch_video, -1, -1) 
         x = torch.concat([cls_video, x], dim=1 )
         x  = self.video_transformer(x)
@@ -101,7 +101,7 @@ class Transformer_Video(nn.Module):
 
         batch_video, _, _ = video_feats.shape 
 
-        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(self.video_length)) 
+        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(self.video_length, device=video_feats.device)) 
         cls_video = self.cls_video.expand(batch_video, -1, -1) 
         x = torch.concat([cls_video, x], dim=1 )
         x  = self.video_transformer(x)
@@ -140,14 +140,13 @@ class Transformer_Audio(nn.Module):
     def forward(self, audio_feats):
 
         batch_audio, _ , _ = audio_feats.shape
-        x = self.audio_proj(audio_feats) + self.embedding_audio(torch.arange(self.audio_length)) 
+        x = self.audio_proj(audio_feats) + self.embedding_audio(torch.arange(self.audio_length, device=audio_feats.device)) 
         cls_aud = self.cls_audio.expand(batch_audio, -1, -1) 
         x = torch.concat([cls_aud, x], dim=1 )
         x  = self.audio_transformer(x) 
         audio_token  = x[:,0, :]
 
         return audio_token
-
 
 
 
