@@ -8,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from netvlad import NetVLAD, NetRVLAD
+from transformer import Transformer_Audio, Transformer_Video, Transformer
 from dataset import SOS_TOKEN, EOS_TOKEN
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 import random
@@ -114,6 +115,95 @@ class VideoEncoder(nn.Module):
             inputs_pooled = torch.cat((inputs_before_pooled, inputs_after_pooled), dim=1)
 
         return inputs_pooled
+
+class MultimodalTransformerCaption(nn.Module):
+    def __init__(self, input_size=512, vlad_k=64, window_size=15, framerate=2, pool="Transformer_Video"):
+        '''
+        Same as the video encoder but we have audio and a transformer now
+        Using the same recepie as above but tweaking to incorporate audio as well
+
+        Can do the following 
+        Transformer on Audio embeddings only 
+        Transformer on Video embeddings only 
+        Transformer on Audio and Video embeddings only 
+        All the above use late fusion
+        '''
+        super(MultimodalTransformerCaption, self).__init__()
+
+        self.window_size_frame=window_size * framerate
+        self.input_size = input_size
+        self.framerate = framerate
+        self.pool = pool
+        self.vlad_k = vlad_k
+
+        # are feature alread PCA'ed?
+        if not self.input_size == 512:   
+            self.feature_extractor = nn.Linear(self.input_size, 512)
+            input_size = 512
+            self.input_size = 512
+        
+        if self.pool == "Transformer_Video":
+            self.pooling_layer = Transformer_Video(video_feat_dim=self.input_size, video_d_model=self.input_size, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame)
+            self.hidden_size = self.input_size
+        elif self.pool == "Transformer_Audio":
+             #TODO: @Chidi, need to get the Transformer Audio feature size! 
+             self.pooling_layer = Transformer_Audio(audio_feat_dim=self.input_size, audio_d_model=self.input_size, audio_nhead=2, audio_num_layers=2, audio_length=self.window_size_frame)
+             self.hidden_size = self.input_size         
+
+        elif self.pool == "Transformer":
+             #TODO: @Chidi, need to get the Transformer Audio feature size! 
+             self.pooling_layer = Transformer(video_feat_dim=self.input_size, video_d_model=self.input_size, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame , audio_feat_dim=self.input_size, audio_d_model=self.input_size, audio_nhead=2, audio_num_layers=2, audio_length=self.window_size_frame)
+             self.hidden_size = self.input_size  * 2 
+    def forward(self, audio_feats=None, video_feats=None):
+        if audio_feats ==None and video_feats==None:
+            raise NotImplementedError
+        
+        if (video_feats is not None and  audio_feats is None ):
+            '''If we only have video features '''
+            BS, FR, IC = video_feats.shape
+            if not IC == 512:
+                video_feats = video_feats.reshape(BS*FR, IC)
+                video_feats = self.feature_extractor(video_feats)
+                video_feats = video_feats.reshape(BS, FR, -1)
+            cls_video_token = self.pooling_layer(video_feats)
+            return cls_video_token
+        
+        elif (audio_feats is not None and  video_feats is None):
+            '''If we only have audio features'''
+            BS, FR, IC = audio_feats.shape
+
+            #TODO: @Chidi, how do we know the dimensions of the audio? are we PCAIng the audip? 
+            if not IC == 512:
+                audio_feats = audio_feats.reshape(BS*FR, IC)
+                audio_feats = self.feature_extractor(audio_feats)
+                audio_feats = audio_feats.reshape(BS, FR, -1)
+            cls_audio_token = self.pooling_layer(audio_feats)
+            return cls_audio_token
+        
+        elif (video_feats is not None  and audio_feats is not None):
+            '''if we have both features'''
+            BS_vid, FR_vid, IC_vid = video_feats.shape
+            BS_audio, FR_audio, IC_audio = audio_feats.shape
+
+            #TODO: @Chidi, how do we know the dimensions of the audio? are we PCAIng the audip? 
+            if not IC_vid == 512:
+                video_feats = video_feats.reshape(BS_vid*FR_vid, IC_vid)
+                video_feats = self.feature_extractor(video_feats)
+                video_feats = video_feats.reshape(BS_vid, FR_vid, -1)
+            if not IC_audio == 512:
+                '''TODO: We need to know the dims of audio'''
+                audio_feats = audio_feats.reshape(BS_audio*FR_audio, IC_audio)
+                audio_feats = self.feature_extractor(audio_feats)
+                audio_feats= audio_feats.reshape(BS_vid, FR_vid, -1)
+            cls_audio_token, cls_video_token = self.pooling_layer(video_feats, audio_feats)
+            final_token  = torch.concat([cls_audio_token, cls_video_token], dim=1)
+            return final_token
+        
+        
+        
+
+        
+
 
 class DecoderRNN(nn.Module):
     def __init__(self, input_size, embed_size, hidden_size, vocab_size, num_layers=2):
