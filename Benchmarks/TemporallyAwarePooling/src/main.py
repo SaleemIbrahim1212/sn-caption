@@ -55,6 +55,7 @@ if __name__ == '__main__':
     parser.add_argument('--patience', required=False, type=int,   default=10,     help='Patience before reducing LR (ReduceLROnPlateau)' )
 
     parser.add_argument('--GPU',        required=False, type=int,   default=-1,     help='ID of the GPU to use' )
+    parser.add_argument('--device',     required=False, type=str,   default=None,   help='torch device (e.g., cpu, cuda, cuda:0)' )
     parser.add_argument('--max_num_worker',   required=False, type=int,   default=4, help='number of worker to load data')
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
 
@@ -93,6 +94,8 @@ if __name__ == '__main__':
     if args.GPU >= 0:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+    if args.device is None:
+        args.device = "cuda" if args.GPU >= 0 and torch.cuda.is_available() else "cpu"
 
 
     start=time.time()

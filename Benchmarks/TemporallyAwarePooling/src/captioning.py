@@ -14,8 +14,16 @@ from utils import valid_probability
 
 import wandb
 
+def resolve_device(args):
+    if getattr(args, "device", None) is not None:
+        return torch.device(args.device)
+    if getattr(args, "GPU", -1) >= 0 and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
 
 def main(args):
+    device = resolve_device(args)
 
     logging.info("Parameters:")
     for arg in vars(args):
@@ -39,7 +47,7 @@ def main(args):
                   framerate=args.framerate,
                   pool=args.pool,
                   num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).cuda()
+                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -47,7 +55,7 @@ def main(args):
                     framerate=args.framerate,
                     pool=args.pool,
                     num_layers=args.num_layers,
-                    teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).cuda()
+                    teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
         
     logging.info(model)
     total_params = sum(p.numel()
@@ -87,9 +95,9 @@ def main(args):
                 max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency)
 
     # For the best model only
-    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"))
+    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
-    model = model.cuda()
+    model = model.to(device)
 
     # validate caption generation on groundtruth spots on multiple splits [test/challenge]
     for split in args.split_test:
@@ -130,6 +138,7 @@ def main(args):
     return 
 
 def dvc(args):
+    device = resolve_device(args)
 
     logging.info("Parameters:")
     for arg in vars(args):
@@ -148,7 +157,7 @@ def dvc(args):
                   framerate=args.framerate,
                   pool=args.pool,
                   num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).cuda()
+                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
     else: 
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -156,7 +165,7 @@ def dvc(args):
                     framerate=args.framerate,
                     pool=args.pool,
                     num_layers=args.num_layers,
-                    teacher_forcing_ratio=args.teacher_forcing_ratio).cuda()
+                    teacher_forcing_ratio=args.teacher_forcing_ratio).to(device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -164,9 +173,9 @@ def dvc(args):
     logging.info("Total number of parameters: " + str(total_params))
 
     # For the best model only
-    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"))
+    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
-    model = model.cuda()
+    model = model.to(device)
 
     # generate dense caption on multiple splits [test/challenge]
     for split in args.split_test:
@@ -243,6 +252,7 @@ if __name__ == '__main__':
     parser.add_argument('--patience', required=False, type=int,   default=10,     help='Patience before reducing LR (ReduceLROnPlateau)' )
 
     parser.add_argument('--GPU',        required=False, type=int,   default=-1,     help='ID of the GPU to use' )
+    parser.add_argument('--device',     required=False, type=str,   default=None,   help='torch device (e.g., cpu, cuda, cuda:0)' )
     parser.add_argument('--max_num_worker',   required=False, type=int,   default=4, help='number of worker to load data')
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
     parser.add_argument('--caption_type',   required=True, type=str,   default='INFO', help='Transformer based Aggregator System/ Boring Aggregator')
@@ -282,6 +292,8 @@ if __name__ == '__main__':
     if args.GPU >= 0:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+    if args.device is None:
+        args.device = "cuda" if args.GPU >= 0 and torch.cuda.is_available() else "cpu"
 
 
     start=time.time()

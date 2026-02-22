@@ -14,7 +14,15 @@ from loss import NLLLoss
 
 import wandb
 
+def resolve_device(args):
+    if getattr(args, "device", None) is not None:
+        return torch.device(args.device)
+    if getattr(args, "GPU", -1) >= 0 and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
 def main(args):
+    device = resolve_device(args)
 
     logging.info("Parameters:")
     for arg in vars(args):
@@ -41,7 +49,7 @@ def main(args):
     model = Video2Spot(weights=args.load_weights, input_size=args.feature_dim,
                   num_classes=dataset_Test.num_classes, window_size=window_size, 
                   vlad_k=args.vlad_k,
-                  framerate=args.framerate, pool=args.pool, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).cuda()
+                  framerate=args.framerate, pool=args.pool, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -80,7 +88,7 @@ def main(args):
                 max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency)
 
     # For the best model only
-    checkpoint = torch.load(os.path.join("models", args.model_name, "spotting", "model.pth.tar"))
+    checkpoint = torch.load(os.path.join("models", args.model_name, "spotting", "model.pth.tar"), map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
 
     # test on multiple splits [test/challenge]
@@ -144,6 +152,7 @@ if __name__ == '__main__':
     parser.add_argument('--patience', required=False, type=int,   default=10,     help='Patience before reducing LR (ReduceLROnPlateau)' )
 
     parser.add_argument('--GPU',        required=False, type=int,   default=-1,     help='ID of the GPU to use' )
+    parser.add_argument('--device',     required=False, type=str,   default=None,   help='torch device (e.g., cpu, cuda, cuda:0)' )
     parser.add_argument('--max_num_worker',   required=False, type=int,   default=4, help='number of worker to load data')
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
 
@@ -183,6 +192,8 @@ if __name__ == '__main__':
     if args.GPU >= 0:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+    if args.device is None:
+        args.device = "cuda" if args.GPU >= 0 and torch.cuda.is_available() else "cpu"
 
 
     start=time.time()
