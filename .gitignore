@@ -6,3 +6,4 @@ ENV/
 data/
 models/
 wandb/
+"__pycache__/" 
