@@ -117,7 +117,7 @@ class VideoEncoder(nn.Module):
         return inputs_pooled
 
 class MultimodalTransformerCaption(nn.Module):
-    def __init__(self, input_size=512, vlad_k=64, window_size=15, framerate=2, pool="Transformer_Video"):
+    def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video"):
         '''
         Same as the video encoder but we have audio and a transformer now
         Using the same recepie as above but tweaking to incorporate audio as well
@@ -134,7 +134,6 @@ class MultimodalTransformerCaption(nn.Module):
         self.input_size = input_size
         self.framerate = framerate
         self.pool = pool
-        self.vlad_k = vlad_k
 
         # are feature alread PCA'ed?
         if not self.input_size == 512:   
@@ -310,6 +309,69 @@ class Video2Caption(nn.Module):
     def sample(self, features, max_seq_length=70):
         features = self.encoder(features.unsqueeze(0))
         return self.decoder.sample(features, max_seq_length)
+
+class SoccerNetTransformerCaption(nn.Module):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False):
+        super(SoccerNetTransformerCaption, self).__init__()
+        self.encoder = MultimodalTransformerCaption(input_size, window_size, framerate, pool)
+        self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size, hidden_size, vocab_size, num_layers)
+        self.load_weights(weights=weights)
+        self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
+        self.vocab_size = vocab_size
+        self.teacher_forcing_ratio = teacher_forcing_ratio
+            
+    def load_encoder(self, weights_encoder=None, freeze_encoder=False):
+        if(weights_encoder is not None):
+            print("=> loading encoder '{}'".format(weights_encoder))
+            checkpoint = torch.load(weights_encoder, map_location=torch.device('cpu'))
+            self.load_state_dict({k :v for k, v in checkpoint['state_dict'].items() if "encoder." in k}, strict=False)
+            print("=> loaded checencoderkpoint '{}' (epoch {})"
+                  .format(weights_encoder, checkpoint['epoch']))
+            
+            if freeze_encoder:
+                for param in self.encoder.parameters():
+                    param.requires_grad = False
+    
+    def forward(self, features_video, features_audio, captions, lengths):
+        if (self.encoder.pool == "Transformer_Video"):
+            '''Get the cls token just for the video'''
+            features = self.encoder(features_video)
+        elif (self.encoder.pool == "Transformer_Audio"):
+            '''get the cls token just for the audio'''
+            features = self.encoder(features_audio)
+        else:
+            '''get the cls token for the combined versions'''
+            features = self.encoder(features_video, features_audio)
+        batch_size = captions.size(0)
+        captions = captions[:, :-1]  # Remove last word in caption to use as input
+        use_teacher_forcing = random.random() < self.teacher_forcing_ratio
+        if use_teacher_forcing:
+            # Teacher forcing: Feed the target as the next input
+            decoder_input = captions
+            decoder_output = self.decoder(features, decoder_input, lengths)
+        else:
+            decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
+            decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
+            for t in range(0, captions.size(1)):
+                # Pass through decoder
+                decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
+                decoder_output[:, t, :] = decoder_output_t
+                # Get next input from highest predicted token
+                _, topi = decoder_output_t.topk(1)
+                decoder_input = topi.detach()  # detach from history as input
+            decoder_output = pack_padded_sequence(decoder_output, lengths, batch_first=True, enforce_sorted=False)[0]
+        return decoder_output
+    
+    def sample(self, features_video, features_audio, max_seq_length=70):
+        if (self.encoder.pool == "Transformer_Video"):
+            features = self.encoder(features_video.unsqueeze(0))
+        elif (self.encoder.pool == "Transformer_Audio"):
+            features = self.encoder(features_audio.unsqueeze(0))
+        else:
+            features = self.encoder(features_video.unsqueeze(0), features_audio.unsqueeze(0))
+
+        return self.decoder.sample(features, max_seq_length)
+ 
 
 class Video2Spot(nn.Module):
     def __init__(self, weights=None, input_size=512, num_classes=17, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD", weights_encoder=None, freeze_encoder=False):
