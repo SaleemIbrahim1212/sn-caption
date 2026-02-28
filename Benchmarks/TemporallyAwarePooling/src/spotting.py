@@ -35,6 +35,8 @@ def main(args):
                   num_classes=dataset_Test.num_classes, window_size=args.window_size_spotting, 
                   vlad_k=args.vlad_k,
                   framerate=args.framerate, pool=args.pool, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(args.device)
+    if getattr(args, 'multi_gpu', False) and torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -74,7 +76,11 @@ def main(args):
 
     # For the best model only
     checkpoint = torch.load(os.path.join("models", args.model_name, "spotting", "model.pth.tar"), map_location=args.device)
-    model.load_state_dict(checkpoint['state_dict'])
+    state = checkpoint['state_dict']
+    if state and hasattr(model, 'module') and not next(iter(state.keys())).startswith('module.'):
+        model.module.load_state_dict(state)
+    else:
+        model.load_state_dict(state)
 
     # test on multiple splits [test/challenge]
     for split in args.split_test:

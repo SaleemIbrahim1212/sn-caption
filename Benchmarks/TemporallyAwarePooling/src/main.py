@@ -61,10 +61,12 @@ if __name__ == '__main__':
     parser.add_argument('--patience', required=False, type=int,   default=10,     help='Patience before reducing LR (ReduceLROnPlateau)' )
 
     parser.add_argument('--GPU',        required=False, type=int,   default=-1,     help='ID of the GPU to use' )
+    parser.add_argument('--multi_gpu',  required=False, action='store_true',        help='Use all visible GPUs with DataParallel (ignores --GPU index; uses cuda:0 as primary)' )
     parser.add_argument('--max_num_worker',   required=False, type=int,   default=4, help='number of worker to load data')
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
 
     parser.add_argument('--loglevel',   required=False, type=str,   default='INFO', help='logging level')
+    parser.add_argument('--no_wandb',  required=False, action='store_true', help='Disable Weights & Biases logging (e.g. for non-interactive runs on Kaggle)')
 
     args = parser.parse_args()
 
@@ -81,9 +83,10 @@ if __name__ == '__main__':
                             datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log'))
 
     run = wandb.init(
-    project="DVC-SoccerNet",
-    name=args.model_name,
-    entity="salma-nassri-university",
+        project="DVC-SoccerNet",
+        name=args.model_name,
+        entity="salma-nassri-university",
+        mode="disabled" if args.no_wandb else "online",
     )
 
     wandb.config.update(args)
@@ -101,9 +104,14 @@ if __name__ == '__main__':
     if args.GPU >= 0:
         if torch.cuda.is_available():
             os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
-            os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
-            args.device = torch.device(f'cuda:{args.GPU}')
-            logging.info(f"Using CUDA device {args.GPU}")
+            if getattr(args, 'multi_gpu', False) and torch.cuda.device_count() > 1:
+                # Use all visible GPUs; do not restrict CUDA_VISIBLE_DEVICES
+                args.device = torch.device('cuda:0')
+                logging.info(f"Using multi-GPU (DataParallel) on {torch.cuda.device_count()} devices")
+            else:
+                os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+                args.device = torch.device(f'cuda:{args.GPU}')
+                logging.info(f"Using CUDA device {args.GPU}")
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             args.device = torch.device('mps')
             logging.info("Using MPS (Apple Silicon GPU)")

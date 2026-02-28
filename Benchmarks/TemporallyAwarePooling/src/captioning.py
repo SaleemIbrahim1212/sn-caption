@@ -56,6 +56,8 @@ def main(args):
                       pool=args.pool,
                       num_layers=args.num_layers,
                       teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(args.device)
+    if getattr(args, 'multi_gpu', False) and torch.cuda.device_count() > 1:
+        model = torch.nn.DataParallel(model)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -95,7 +97,11 @@ def main(args):
 
     # For the best model only
     checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=args.device)
-    model.load_state_dict(checkpoint['state_dict'])
+    state = checkpoint['state_dict']
+    if state and hasattr(model, 'module') and not next(iter(state.keys())).startswith('module.'):
+        model.module.load_state_dict(state)
+    else:
+        model.load_state_dict(state)
     model = model.to(args.device)
 
     # validate caption generation on groundtruth spots on multiple splits [test/challenge]
@@ -184,7 +190,11 @@ def dvc(args):
 
     # For the best model only
     checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=args.device)
-    model.load_state_dict(checkpoint['state_dict'])
+    state = checkpoint['state_dict']
+    if state and hasattr(model, 'module') and not next(iter(state.keys())).startswith('module.'):
+        model.module.load_state_dict(state)
+    else:
+        model.load_state_dict(state)
     model = model.to(args.device)
 
     # generate dense caption on multiple splits [test/challenge]

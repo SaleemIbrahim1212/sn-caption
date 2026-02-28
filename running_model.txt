@@ -42,3 +42,4 @@ python src/main.py \
   --batch_size=4 \
   --max_num_worker=0 \
   --split_test test
+  --no_wandb

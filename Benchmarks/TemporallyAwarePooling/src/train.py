@@ -35,9 +35,12 @@ def trainer(phase, train_loader,
     logging.info("start training")
 
     best_loss = 9e99
+    epoch_durations = []  # last N epoch times (seconds) for ETA
+    max_durations = 5
 
     os.makedirs(os.path.join("models", model_name, phase), exist_ok=True)
     for epoch in range(max_epochs):
+        epoch_start = time.time()
         best_model_path = os.path.join("models", model_name, phase, "model.pth.tar")
 
         # train for one epoch
@@ -49,7 +52,7 @@ def trainer(phase, train_loader,
 
         state = {
             'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
+            'state_dict': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
             'best_loss': best_loss,
             'optimizer': optimizer.state_dict(),
         }
@@ -99,6 +102,22 @@ def trainer(phase, train_loader,
             logging.info(
                 "Plateau Reached and no more reduction -> Exiting Loop")
             break
+
+        # Estimated time remaining
+        epoch_elapsed = time.time() - epoch_start
+        epoch_durations.append(epoch_elapsed)
+        if len(epoch_durations) > max_durations:
+            epoch_durations.pop(0)
+        epochs_left = max_epochs - (epoch + 1)
+        if epochs_left > 0 and len(epoch_durations) > 0:
+            avg_epoch_sec = sum(epoch_durations) / len(epoch_durations)
+            remaining_sec = epochs_left * avg_epoch_sec
+            hours = int(remaining_sec // 3600)
+            minutes = int((remaining_sec % 3600) // 60)
+            logging.info(
+                f"Estimated time remaining: ~{hours}h {minutes}m "
+                f"({epochs_left} epochs at ~{avg_epoch_sec/60:.1f} min/epoch)"
+            )
 
     return
 
