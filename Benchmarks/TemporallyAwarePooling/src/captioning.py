@@ -111,7 +111,8 @@ def main(args):
         trainer("caption", train_loader, val_loader, val_metric_loader, 
                 model, optimizer, scheduler, criterion,
                 model_name=args.model_name,
-                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency)
+                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency,
+                log_every_n_batches=args.log_every_n_batches)
 
     # For the best model only
     checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=device)
@@ -253,6 +254,7 @@ if __name__ == '__main__':
     parser.add_argument('--version', required=False, type=int,   default=2,     help='Version of the dataset' )
     parser.add_argument('--feature_dim', required=False, type=int,   default=None,     help='Number of input features' )
     parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Number of chunks per epoch' )
+    parser.add_argument('--log_every_n_batches', required=False, type=int, default=50, help='Log caption batch stats every N batches (<=0 disables)' )
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )
     parser.add_argument('--window_size_caption', required=False, type=int,   default=15,     help='Size of the chunk (in seconds)' )
     parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool for non-transformer captioning' )

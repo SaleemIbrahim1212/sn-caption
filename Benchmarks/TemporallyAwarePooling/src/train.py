@@ -35,7 +35,8 @@ def trainer(phase, train_loader,
             criterion,
             model_name,
             max_epochs=1000,
-            evaluation_frequency=20):
+            evaluation_frequency=20,
+            log_every_n_batches=50):
 
     logging.info("start training")
 
@@ -47,10 +48,10 @@ def trainer(phase, train_loader,
 
         # train for one epoch
         loss_training = train(phase, train_loader, model, criterion,
-                              optimizer, epoch + 1, train=True)
+                              optimizer, epoch + 1, train=True, log_every_n_batches=log_every_n_batches)
 
         # evaluate on validation set
-        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False)
+        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, log_every_n_batches=log_every_n_batches)
 
         state = {
             'epoch': epoch + 1,
@@ -106,7 +107,7 @@ def trainer(phase, train_loader,
 
     return
 
-def train(phase, dataloader, model, criterion, optimizer, epoch, train=False):
+def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, log_every_n_batches=50):
     device = next(model.parameters()).device
 
     batch_time = AverageMeter()
@@ -165,6 +166,27 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
+            if phase == "caption" and log_every_n_batches > 0 and (i + 1) % log_every_n_batches == 0:
+                lr = optimizer.param_groups[0]["lr"] if optimizer is not None else -1.0
+                msg = (
+                    f"[{phase}] epoch={epoch} batch={i + 1}/{len(dataloader)} "
+                    f"loss={loss.item():.4f} avg_loss={losses.avg:.4f} lr={lr:.2e} "
+                    f"data_t={data_time.val:.3f}s iter_t={batch_time.val:.3f}s"
+                )
+                if torch.cuda.is_available():
+                    mem = torch.cuda.memory_allocated() / (1024 ** 3)
+                    max_mem = torch.cuda.max_memory_allocated() / (1024 ** 3)
+                    msg += f" gpu_mem={mem:.2f}G max_gpu_mem={max_mem:.2f}G"
+                logging.info(msg)
+                if wandb.run is not None:
+                    wandb.log({
+                        f"{phase}/batch_loss": float(loss.item()),
+                        f"{phase}/batch_avg_loss": float(losses.avg),
+                        f"{phase}/lr": float(lr),
+                        "epoch": int(epoch),
+                        f"{phase}/batch_idx": int(i + 1),
+                    })
 
             # measure elapsed time
             batch_time.update(time.time() - end)
