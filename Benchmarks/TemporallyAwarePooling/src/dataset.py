@@ -282,23 +282,13 @@ class SoccerNetCaptions(Dataset):
         downloader.downloadGames(files=[self.labels, f"1_{self.features}", f"2_{self.features}"], task="caption",split=split, verbose=False,randomized=True)
 
         self.data = list()
-        self.game_feats = list()
+        self.l_pad = self.window_size_frame//2 + self.window_size_frame%2
+        self.r_pad = self.window_size_frame//2
 
-        l_pad = self.window_size_frame//2 + self.window_size_frame%2
-        r_pad = self.window_size_frame//2 
-
-        for game_id, game in enumerate(tqdm(self.listGames)):
-            # Load features
-            feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
-            feat_half1 = np.pad(feat_half1.reshape(-1, feat_half1.shape[-1]), ((l_pad, r_pad), (0, 0)), "edge")
-            feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
-            feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((l_pad, r_pad), (0, 0)), "edge")
-            
-            self.game_feats.append((feat_half1, feat_half2)) 
-
-            # Load labels
+        for game_id, game in enumerate(tqdm(self.listGames, desc="Building caption index")):
+            # Load labels only (features loaded lazily in __getitem__)
             labels = json.load(open(os.path.join(self.path, game, self.labels)))
-            
+
             for caption_id, annotation in enumerate(labels["annotations"]):
 
                 time = annotation["gameTime"]
@@ -309,10 +299,10 @@ class SoccerNetCaptions(Dataset):
 
                 minutes, seconds = time.split(' ')[-1].split(':')
                 minutes, seconds = int(minutes), int(seconds)
-                frame = framerate * ( seconds + 60 * minutes) 
-                
+                frame = framerate * ( seconds + 60 * minutes)
+
                 self.data.append(((game_id, half-1, frame) , (caption_id, annotation['anonymized'])))
-        
+
         #launch a VideoProcessor that will create a clip around a caption
         self.video_processor = SoccerNetVideoProcessor(self.window_size_frame)
         #launch a TextProcessor that will tokenize a caption
@@ -321,6 +311,15 @@ class SoccerNetCaptions(Dataset):
 
     def __len__(self):
         return len(self.data)
+
+    def _load_game_features(self, game_id):
+        """Load and pad features for a single game (lazy loading)."""
+        game = self.listGames[game_id]
+        feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
+        feat_half1 = np.pad(feat_half1.reshape(-1, feat_half1.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
+        feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
+        feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
+        return (feat_half1, feat_half2)
 
     def __getitem__(self, idx):
         """
@@ -334,11 +333,15 @@ class SoccerNetCaptions(Dataset):
             caption (List[strings]): list of original captions.
         """
         clip_id, (caption_id, caption) = self.data[idx]
-        vfeats = self.video_processor(clip_id, self.game_feats)
-        caption_tokens = self.text_processor(caption)    
-        
+        game_id = clip_id[0]
+        game_feats = self._load_game_features(game_id)
+        # VideoProcessor expects feats[video_id][half]; pass a list with only this game at index game_id
+        feats_for_processor = [None] * game_id + [game_feats]
+        vfeats = self.video_processor(clip_id, feats_for_processor)
+        caption_tokens = self.text_processor(caption)
+
         return vfeats, caption_tokens, clip_id[0], caption_id, caption
-    
+
     def getCorpus(self, split=["train"]):
         """
         Args:
@@ -389,9 +392,14 @@ class SoccerNetTextProcessor(object):
         spacy_token.add_special_case("[TEAM]", [{"ORTH": "[TEAM]"}])
         spacy_token.add_special_case("([TEAM])", [{"ORTH": "([TEAM])"}])
         spacy_token.add_special_case("[REFEREE]", [{"ORTH": "[REFEREE]"}])
-        self.tokenizer = lambda s: [c.text for c in spacy_token(s)]
+        # self.tokenizer = lambda s: [c.text for c in spacy_token(s)]
+        self.spacy_token = spacy_token
         self.min_freq = min_freq
         self.build_vocab(corpus)
+    
+    def tokenizer(self, s):
+        """Tokenize a string using spaCy. This method is picklable for multiprocessing."""
+        return [c.text for c in self.spacy_token(s)]
     
     def build_vocab(self, corpus):
         counter = Counter([token for c in corpus for token in self.tokenizer(c)])
@@ -421,23 +429,12 @@ class PredictionCaptions(Dataset):
         downloader.downloadGames(files=[f"1_{self.features}", f"2_{self.features}"], task="caption", split=split, verbose=False,randomized=True)
 
         self.data = list()
-        self.game_feats = list()
+        self.l_pad = self.window_size_frame//2 + self.window_size_frame%2
+        self.r_pad = self.window_size_frame//2
 
-        l_pad = self.window_size_frame//2 + self.window_size_frame%2
-        r_pad = self.window_size_frame//2 
-
-        for game_id, game in enumerate(tqdm(self.listGames)):
-            # Load features
-            feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
-            feat_half1 = np.pad(feat_half1.reshape(-1, feat_half1.shape[-1]), ((l_pad, r_pad), (0, 0)), "edge")
-            feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
-            feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((l_pad, r_pad), (0, 0)), "edge")
-            
-            self.game_feats.append((feat_half1, feat_half2)) 
-
-            # Load labels
+        for game_id, game in enumerate(tqdm(self.listGames, desc="Building prediction index")):
             preds = json.load(open(os.path.join(self.PredictionPath, game, "results_spotting.json")))
-            
+
             for caption_id, annotation in enumerate(preds["predictions"]):
 
                 if annotation["label"] not in self.dict_event:
@@ -450,16 +447,25 @@ class PredictionCaptions(Dataset):
 
                 minutes, seconds = time.split(' ')[-1].split(':')
                 minutes, seconds = int(minutes), int(seconds)
-                frame = framerate * ( int(seconds) + 60 * int(minutes)) 
-                
+                frame = framerate * ( int(seconds) + 60 * int(minutes))
+
                 self.data.append(((game_id, half-1, frame), caption_id))
-        
+
         #launch a VideoProcessor that will create a clip around a caption
         self.video_processor = SoccerNetVideoProcessor(self.window_size_frame)
         #launch a TextProcessor that will tokenize a caption
         self.text_processor = SoccerNetTextProcessor(self.getCorpus(split=["train"]))
         self.vocab_size = len(self.text_processor.vocab)
-    
+
+    def _load_game_features(self, game_id):
+        """Load and pad features for a single game (lazy loading)."""
+        game = self.listGames[game_id]
+        feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
+        feat_half1 = np.pad(feat_half1.reshape(-1, feat_half1.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
+        feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
+        feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
+        return (feat_half1, feat_half2)
+
     def __len__(self):
         return len(self.data)
 
@@ -473,7 +479,10 @@ class PredictionCaptions(Dataset):
             caption_id (np.array): caption id.
         """
         clip_id, caption_id = self.data[idx]
-        vfeats = self.video_processor(clip_id, self.game_feats)   
+        game_id = clip_id[0]
+        game_feats = self._load_game_features(game_id)
+        feats_for_processor = [None] * game_id + [game_feats]
+        vfeats = self.video_processor(clip_id, feats_for_processor)
         return vfeats, clip_id[0], caption_id
 
 
