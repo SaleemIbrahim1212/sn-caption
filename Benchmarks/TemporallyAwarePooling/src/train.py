@@ -30,16 +30,18 @@ def trainer(phase, train_loader,
             model_name,
             max_epochs=1000,
             evaluation_frequency=20,
-            device=torch.device('cpu')):
+            device=torch.device('cpu'),
+            start_epoch=0,
+            initial_best_loss=9e99):
 
-    logging.info("start training")
+    logging.info("start training" + (f" (resuming from epoch {start_epoch})" if start_epoch > 0 else ""))
 
-    best_loss = 9e99
+    best_loss = initial_best_loss
     epoch_durations = []  # last N epoch times (seconds) for ETA
     max_durations = 5
 
     os.makedirs(os.path.join("models", model_name, phase), exist_ok=True)
-    for epoch in range(max_epochs):
+    for epoch in range(start_epoch, max_epochs):
         epoch_start = time.time()
         best_model_path = os.path.join("models", model_name, phase, "model.pth.tar")
 
@@ -55,6 +57,7 @@ def trainer(phase, train_loader,
             'state_dict': model.module.state_dict() if hasattr(model, 'module') else model.state_dict(),
             'best_loss': best_loss,
             'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
         }
         os.makedirs(os.path.join("models", model_name), exist_ok=True)
 
@@ -134,6 +137,7 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, de
         model.eval()
 
     end = time.time()
+    epoch_start = time.time()
     with tqdm(enumerate(dataloader), total=len(dataloader)) as t:
         for i, batch in t:
             # measure data loading time
@@ -183,11 +187,13 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, de
             n = i + 1
             total_batches = len(dataloader)
             pct = 100 * n / total_batches if total_batches else 0
+            elapsed = time.time() - epoch_start
             if train:
                 desc = f'Train {epoch}: [{n}/{total_batches} {pct:.0f}%] '
             else:
                 desc = f'Evaluate {epoch}: [{n}/{total_batches} {pct:.0f}%] '
-            desc += f'Time {batch_time.avg:.3f}s '
+            desc += f'Elapsed {elapsed:.0f}s '
+            desc += f'Avg batch {batch_time.avg:.3f}s '
             desc += f'(it:{batch_time.val:.3f}s) '
             desc += f'Data:{data_time.avg:.3f}s '
             desc += f'(it:{data_time.val:.3f}s) '

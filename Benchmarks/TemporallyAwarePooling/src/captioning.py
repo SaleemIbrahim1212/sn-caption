@@ -32,11 +32,15 @@ def main(args):
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][0].shape[-1]
         print("feature_dim found:", args.feature_dim)
+    resume = getattr(args, 'resume', False)
+    resume_path = os.path.join("models", args.model_name, "caption", "model.pth.tar") if not args.test_only else None
+    weights_for_init = None if (resume and resume_path and os.path.isfile(resume_path)) else args.load_weights
+
     # create model (transformer + late fusion for caption, or original NetVLAD-based)
     if getattr(args, 'use_transformer_caption', False):
         model = Video2CaptionWithTransformer(
             vocab_size=dataset_Test.vocab_size,
-            weights=args.load_weights,
+            weights=weights_for_init,
             input_size=args.feature_dim,
             window_size=args.window_size_caption,
             framerate=args.framerate,
@@ -49,7 +53,7 @@ def main(args):
             freeze_encoder=args.freeze_encoder,
         ).to(args.device)
     else:
-        model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
+        model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=weights_for_init, input_size=args.feature_dim,
                       window_size=args.window_size_caption,
                       vlad_k=args.vlad_k,
                       framerate=args.framerate,
@@ -94,11 +98,35 @@ def main(args):
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True, patience=args.patience)
 
+        start_epoch = 0
+        initial_best_loss = 9e99
+        if resume and resume_path and os.path.isfile(resume_path):
+            checkpoint = torch.load(resume_path, map_location=args.device)
+            state = checkpoint["state_dict"]
+            if state and hasattr(model, 'module') and not next(iter(state.keys())).startswith('module.'):
+                model.module.load_state_dict(state, strict=False)
+            else:
+                model.load_state_dict(state, strict=False)
+            if "optimizer" in checkpoint:
+                try:
+                    optimizer.load_state_dict(checkpoint["optimizer"])
+                except Exception as e:
+                    logging.warning("Could not load optimizer state: %s", e)
+            if "scheduler" in checkpoint:
+                try:
+                    scheduler.load_state_dict(checkpoint["scheduler"])
+                except Exception as e:
+                    logging.warning("Could not load scheduler state: %s", e)
+            start_epoch = checkpoint.get("epoch", 0)
+            initial_best_loss = checkpoint.get("best_loss", 9e99)
+            logging.info("Resumed from epoch %s, best_loss %.4e", start_epoch, initial_best_loss)
+
         # start training
         trainer("caption", train_loader, val_loader, val_metric_loader, 
                 model, optimizer, scheduler, criterion,
                 model_name=args.model_name,
-                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency, device=args.device)
+                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency, device=args.device,
+                start_epoch=start_epoch, initial_best_loss=initial_best_loss)
 
     # For the best model only
     checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=args.device)
@@ -248,6 +276,7 @@ if __name__ == '__main__':
     parser.add_argument('--features',   required=False, type=str,   default="ResNET_TF2.npy",     help='Video features' )
     parser.add_argument('--max_epochs',   required=False, type=int,   default=1000,     help='Maximum number of epochs' )
     parser.add_argument('--load_weights',   required=False, type=str,   default=None,     help='weights to load' )
+    parser.add_argument('--resume',        required=False, action='store_true', help='Resume training from models/<model_name>/caption/model.pth.tar (epoch, optimizer, best_loss)' )
     parser.add_argument('--model_name',   required=False, type=str,   default="NetVLAD++",     help='named of the model to save' )
     parser.add_argument('--test_only',   required=False, action='store_true',  help='Perform testing only' )
 
