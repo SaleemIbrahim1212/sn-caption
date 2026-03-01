@@ -315,7 +315,7 @@ class SoccerNetCaptions(Dataset):
     def _load_game_features(self, game_id):
         return self._cached_load(game_id) # Adding this to help with loading data 
 
-    @lru_cache(maxsize=64)
+    @lru_cache(maxsize=32)
     def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
         game = self.listGames[game_id]
@@ -465,7 +465,7 @@ class PredictionCaptions(Dataset):
     def _load_game_features(self, game_id):
         return self._cached_load(game_id) # Adding this to help with loading data 
 
-    @lru_cache(maxsize=64)
+    @lru_cache(maxsize=32)
     def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
         game = self.listGames[game_id]
