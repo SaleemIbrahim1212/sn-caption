@@ -218,8 +218,8 @@ class DecoderRNN(nn.Module):
         features = torch.stack([features]*self.num_layers)
         #Embdedding
         captions = self.embed(captions)
-        #To reduce the computation, we pack padd sequences
-        captions = pack_padded_sequence(captions, lengths, batch_first=True, enforce_sorted=False)
+        #To reduce the computation, we pack padd sequences (lengths must be on CPU)
+        captions = pack_padded_sequence(captions, lengths.cpu(), batch_first=True, enforce_sorted=False)
         #Video encoder features are used as initial states
         hiddens, _ = self.lstm(captions, (features, features))
         outputs = self.fc(hiddens[0])
@@ -300,9 +300,9 @@ class Video2Caption(nn.Module):
                 # Get next input from highest predicted token
                 _, topi = decoder_output_t.topk(1)
                 decoder_input = topi.detach()  # detach from history as input
-            decoder_output = pack_padded_sequence(decoder_output, lengths, batch_first=True, enforce_sorted=False)[0]
+            decoder_output = pack_padded_sequence(decoder_output, lengths.cpu(), batch_first=True, enforce_sorted=False)[0]
         return decoder_output
-    
+
     def sample(self, features, max_seq_length=70):
         features = self.encoder(features.unsqueeze(0))
         return self.decoder.sample(features, max_seq_length)
@@ -394,7 +394,7 @@ class Video2CaptionWithTransformer(nn.Module):
                 _, topi = decoder_output_t.topk(1)
                 decoder_input = topi.detach()
             decoder_output = pack_padded_sequence(
-                decoder_output, lengths, batch_first=True, enforce_sorted=False
+                decoder_output, lengths.cpu(), batch_first=True, enforce_sorted=False
             )[0]
         return decoder_output
 

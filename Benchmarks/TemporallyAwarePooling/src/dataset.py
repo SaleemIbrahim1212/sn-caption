@@ -12,6 +12,7 @@ import torch
 
 import logging
 import json
+from functools import lru_cache
 
 from collections import Counter
 from torchtext.vocab import vocab
@@ -313,6 +314,10 @@ class SoccerNetCaptions(Dataset):
         return len(self.data)
 
     def _load_game_features(self, game_id):
+        return self._cached_load(game_id)
+
+    @lru_cache(maxsize=16)
+    def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
         game = self.listGames[game_id]
         feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
@@ -458,6 +463,10 @@ class PredictionCaptions(Dataset):
         self.vocab_size = len(self.text_processor.vocab)
 
     def _load_game_features(self, game_id):
+        return self._cached_load(game_id)
+
+    @lru_cache(maxsize=16)
+    def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
         game = self.listGames[game_id]
         feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))

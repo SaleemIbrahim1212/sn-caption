@@ -180,10 +180,13 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, de
             batch_time.update(time.time() - end)
             end = time.time()
 
+            n = i + 1
+            total_batches = len(dataloader)
+            pct = 100 * n / total_batches if total_batches else 0
             if train:
-                desc = f'Train {epoch}: '
+                desc = f'Train {epoch}: [{n}/{total_batches} {pct:.0f}%] '
             else:
-                desc = f'Evaluate {epoch}: '
+                desc = f'Evaluate {epoch}: [{n}/{total_batches} {pct:.0f}%] '
             desc += f'Time {batch_time.avg:.3f}s '
             desc += f'(it:{batch_time.val:.3f}s) '
             desc += f'Data:{data_time.avg:.3f}s '
