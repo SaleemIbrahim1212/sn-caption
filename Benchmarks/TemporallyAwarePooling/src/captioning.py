@@ -85,7 +85,7 @@ def main(args):
     # create dataloader
     if not args.test_only:
         train_loader = torch.utils.data.DataLoader(dataset_Train,
-            batch_size=args.batch_size, shuffle=True,
+            batch_size=args.batch_size, shuffle=False,
             num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
 
         val_loader = torch.utils.data.DataLoader(dataset_Valid,
