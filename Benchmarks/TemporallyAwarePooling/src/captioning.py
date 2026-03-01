@@ -64,19 +64,24 @@ def main(args):
     parameters_per_layer  = [p.numel() for p in model.parameters() if p.requires_grad]
     logging.info("Total number of parameters: " + str(total_params))
 
-    # create dataloader
+    # create dataloader (persistent_workers keeps workers alive across epochs for warm LRU cache)
+    nw = args.max_num_worker
+    persistent = nw > 0
     if not args.test_only:
         train_loader = torch.utils.data.DataLoader(dataset_Train,
             batch_size=args.batch_size, shuffle=True,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
+            num_workers=nw, pin_memory=True, collate_fn=collate_fn_padd,
+            persistent_workers=persistent)
 
         val_loader = torch.utils.data.DataLoader(dataset_Valid,
             batch_size=args.batch_size, shuffle=False,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
+            num_workers=nw, pin_memory=True, collate_fn=collate_fn_padd,
+            persistent_workers=persistent)
 
         val_metric_loader = torch.utils.data.DataLoader(dataset_Valid_metric,
             batch_size=args.batch_size, shuffle=False,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
+            num_workers=nw, pin_memory=True, collate_fn=collate_fn_padd,
+            persistent_workers=persistent)
 
 
     # training parameters
