@@ -137,9 +137,9 @@ class MultimodalTransformerCaption(nn.Module):
 
         # are feature alread PCA'ed?
         if not self.input_size == 512:   
-            self.feature_extractor = nn.Linear(self.input_size, 256)
-            input_size = 256
-            self.input_size = 256
+            self.feature_extractor = nn.Linear(self.input_size, 512)
+            input_size = 512
+            self.input_size = 512
         
         if self.pool == "Transformer_Video":
             self.pooling_layer = Transformer_Video(video_feat_dim=self.input_size, video_d_model=self.input_size, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame)
@@ -311,7 +311,7 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=128, hidden_size=256, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(input_size, window_size, framerate, pool)
         self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size, hidden_size, vocab_size, num_layers)
