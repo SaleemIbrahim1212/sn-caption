@@ -39,6 +39,7 @@ def trainer(phase, train_loader,
     best_loss = initial_best_loss
     epoch_durations = []  # last N epoch times (seconds) for ETA
     max_durations = 5
+    training_start = time.time()
 
     os.makedirs(os.path.join("models", model_name, phase), exist_ok=True)
     for epoch in range(start_epoch, max_epochs):
@@ -47,10 +48,10 @@ def trainer(phase, train_loader,
 
         # train for one epoch
         loss_training = train(phase, train_loader, model, criterion,
-                              optimizer, epoch + 1, train=True, device=device)
+                              optimizer, epoch + 1, train=True, device=device, run_start_time=training_start)
 
         # evaluate on validation set
-        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, device=device)
+        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, device=device, run_start_time=training_start)
 
         state = {
             'epoch': epoch + 1,
@@ -124,7 +125,7 @@ def trainer(phase, train_loader,
 
     return
 
-def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, device=torch.device('cpu')):
+def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, device=torch.device('cpu'), run_start_time=None):
 
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -192,7 +193,12 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, de
                 desc = f'Train {epoch}: [{n}/{total_batches} {pct:.0f}%] '
             else:
                 desc = f'Evaluate {epoch}: [{n}/{total_batches} {pct:.0f}%] '
-            desc += f'Elapsed {elapsed:.0f}s '
+            if run_start_time is not None:
+                total_sec = time.time() - run_start_time
+                th, tm = int(total_sec // 3600), int((total_sec % 3600) // 60)
+                desc += f'Total {th}h {tm}m '
+            else:
+                desc += f'Elapsed {elapsed:.0f}s '
             desc += f'Avg batch {batch_time.avg:.3f}s '
             desc += f'(it:{batch_time.val:.3f}s) '
             desc += f'Data:{data_time.avg:.3f}s '
