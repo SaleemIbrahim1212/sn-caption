@@ -12,7 +12,7 @@ import torch
 
 import logging
 import json
-
+from functools import lru_cache
 from collections import Counter
 from torchtext.vocab import vocab
 
@@ -313,6 +313,10 @@ class SoccerNetCaptions(Dataset):
         return len(self.data)
 
     def _load_game_features(self, game_id):
+        return self._cached_load(game_id) # Adding this to help with loading data 
+
+    @lru_cache(maxsize=16)
+    def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
         game = self.listGames[game_id]
         feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
@@ -320,6 +324,7 @@ class SoccerNetCaptions(Dataset):
         feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
         feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
         return (feat_half1, feat_half2)
+
 
     def __getitem__(self, idx):
         """
@@ -458,6 +463,10 @@ class PredictionCaptions(Dataset):
         self.vocab_size = len(self.text_processor.vocab)
 
     def _load_game_features(self, game_id):
+        return self._cached_load(game_id) # Adding this to help with loading data 
+
+    @lru_cache(maxsize=16)
+    def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
         game = self.listGames[game_id]
         feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
@@ -465,6 +474,7 @@ class PredictionCaptions(Dataset):
         feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
         feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
         return (feat_half1, feat_half2)
+
 
     def __len__(self):
         return len(self.data)
