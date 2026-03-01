@@ -41,11 +41,27 @@ def trainer(phase, train_loader,
     logging.info("start training")
 
     best_loss = 9e99
+    start_epoch = 0
 
     os.makedirs(os.path.join("models", model_name, phase), exist_ok=True)
-    for epoch in range(max_epochs):
-        best_model_path = os.path.join("models", model_name, phase, "model.pth.tar")
 
+    best_model_path = os.path.join("models", model_name, phase, "model.pth.tar")
+    last_model_path = os.path.join("models", model_name, phase, "checkpoint_last.pth.tar")
+    resume_path = last_model_path if os.path.exists(last_model_path) else best_model_path
+    if os.path.exists(resume_path):
+        logging.info(f"Resuming from checkpoint: {resume_path}")
+        checkpoint = torch.load(resume_path, map_location=next(model.parameters()).device)
+        model.load_state_dict(checkpoint['state_dict'])
+        if 'optimizer' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer'])
+        start_epoch = checkpoint.get('epoch', 0)
+        best_loss = checkpoint.get('best_loss', best_loss)
+        logging.info(f"Resumed from epoch {start_epoch}, best_loss={best_loss:.4f}")
+        if 'scheduler' in checkpoint:
+            scheduler.load_state_dict(checkpoint['scheduler'])
+
+    for epoch in range(start_epoch, max_epochs):  
+        #best_model_path = os.path.join("models", model_name, phase, "model.pth.tar")
         # train for one epoch
         loss_training = train(phase, train_loader, model, criterion,
                               optimizer, epoch + 1, train=True, log_every_n_batches=log_every_n_batches)
@@ -58,12 +74,16 @@ def trainer(phase, train_loader,
             'state_dict': model.state_dict(),
             'best_loss': best_loss,
             'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),  
         }
         os.makedirs(os.path.join("models", model_name), exist_ok=True)
 
         # remember best prec@1 and save checkpoint
         is_better = loss_validation < best_loss
         best_loss = min(loss_validation, best_loss)
+        state['best_loss'] = best_loss
+
+        torch.save(state, last_model_path)
 
         # Save the best model based on loss only if the evaluation frequency too long
         if is_better:
