@@ -82,8 +82,9 @@ def main(args):
     parameters_per_layer  = [p.numel() for p in model.parameters() if p.requires_grad]
     logging.info("Total number of parameters: " + str(total_params))
 
-    # create dataloader
     if not args.test_only:
+        rng = np.random.default_rng(args.seed)  
+        rng.shuffle(dataset_Train.data) # Doing this because shuffling has been turned off
         train_loader = torch.utils.data.DataLoader(dataset_Train,
             batch_size=args.batch_size, shuffle=False,
             num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
