@@ -268,7 +268,7 @@ class SoccerNetCaptions(Dataset):
     """
     This class is used to download and pre-compute clips and captions from the SoccerNet dataset for captining training phase.
     """
-    def __init__(self, path, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15):
+    def __init__(self, path, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15, mapping_json = "mapping.json", feature_file = "features.dat" ):
         self.path = path
         split = [s for s in split if s!= "challenge"]
         self.listGames = getListGames(split, task="caption")
@@ -284,6 +284,9 @@ class SoccerNetCaptions(Dataset):
         self.data = list()
         self.l_pad = self.window_size_frame//2 + self.window_size_frame%2
         self.r_pad = self.window_size_frame//2
+        with open(mapping_json, "r") as f:
+            self.mapping = json.load(f)
+        self.memmap = np.memmap(feature_file, mode='r', shape=(self.mapping["total_rows"],8576))
 
         for game_id, game in enumerate(tqdm(self.listGames, desc="Building caption index")):
             # Load labels only (features loaded lazily in __getitem__)
@@ -315,14 +318,13 @@ class SoccerNetCaptions(Dataset):
     def _load_game_features(self, game_id):
         return self._cached_load(game_id) # Adding this to help with loading data 
 
-    @lru_cache(maxsize=32)
     def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
-        game = self.listGames[game_id]
-        feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
-        feat_half1 = np.pad(feat_half1.reshape(-1, feat_half1.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
-        feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
-        feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
+
+        half1_start, half1_len, half2_start, half2_len = self.mapping[str(game_id)]['half1_start'], self.mapping[str(game_id)]['half1_len'],self.mapping[str(game_id)]['half2_start'],self.mapping[str(game_id)]['half2_len']
+        feat_half1 = self.memmap[half1_start : half1_start + half1_len]
+        feat_half2 = self.memmap[half2_start: half2_start + half2_len]
+
         return (feat_half1, feat_half2)
 
 
@@ -419,7 +421,7 @@ class SoccerNetTextProcessor(object):
         return " ".join(self.vocab.lookup_tokens(tokens))
 
 class PredictionCaptions(Dataset):
-    def __init__(self, SoccerNetPath, PredictionPath, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15):
+    def __init__(self, SoccerNetPath, PredictionPath, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15 ,mapping_json = "mapping.json", feature_file = "features.dat"):
         self.path = SoccerNetPath
         self.PredictionPath = PredictionPath
         self.listGames = getListGames(split, task="caption")
@@ -428,7 +430,12 @@ class PredictionCaptions(Dataset):
         self.version = version
         self.labels, _, self.dict_event, _ = getMetaDataTask("caption", "SoccerNet", version)
         self.split = split
+        with open(mapping_json, "r") as f:
+            self.mapping = json.load(f)
+        self.memmap = np.memmap(feature_file, mode='r', shape=(self.mapping["total_rows"],8576))
 
+        
+     
         logging.info("Checking/Download features and labels locally")
         downloader = SoccerNetDownloader(self.path)
         downloader.downloadGames(files=[f"1_{self.features}", f"2_{self.features}"], task="caption", split=split, verbose=False,randomized=True)
@@ -465,14 +472,19 @@ class PredictionCaptions(Dataset):
     def _load_game_features(self, game_id):
         return self._cached_load(game_id) # Adding this to help with loading data 
 
-    @lru_cache(maxsize=32)
     def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
-        game = self.listGames[game_id]
-        feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
-        feat_half1 = np.pad(feat_half1.reshape(-1, feat_half1.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
-        feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
-        feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
+
+        half1_start, half1_len, half2_start, half2_len = self.mapping[str(game_id)]['half1_start'], self.mapping[str(game_id)]['half1_len'],self.mapping[str(game_id)]['half2_start'],self.mapping[str(game_id)]['half2_len']
+        feat_half1 = self.memmap[half1_start : half1_start + half1_len]
+        feat_half2 = self.memmap[half2_start: half2_start + half2_len]
+
+
+        #game = self.listGames[game_id]
+        #feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
+        #
+        #feat_half2 = 
+        #feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
         return (feat_half1, feat_half2)
 
 

@@ -50,10 +50,10 @@ def main(args):
 
     # create dataset
     if not args.test_only:
-        dataset_Train = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
-        dataset_Valid = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
-        dataset_Valid_metric  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
-    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+        dataset_Train = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
+        dataset_Valid = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
+        dataset_Valid_metric  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
+    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
 
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][0].shape[-1]
@@ -83,19 +83,19 @@ def main(args):
     logging.info("Total number of parameters: " + str(total_params))
 
     if not args.test_only:
-        rng = np.random.default_rng(args.seed)  
-        rng.shuffle(dataset_Train.data) # Doing this because shuffling has been turned off
+        #rng = np.random.default_rng(args.seed)  
+        #rng.shuffle(dataset_Train.data) # Doing this because shuffling has been turned off
         train_loader = torch.utils.data.DataLoader(dataset_Train,
-            batch_size=args.batch_size, shuffle=False,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
+            batch_size=args.batch_size, shuffle=True,
+            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd, persistent_workers=(args.max_num_worker > 0) )
 
         val_loader = torch.utils.data.DataLoader(dataset_Valid,
             batch_size=args.batch_size, shuffle=False,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
+            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd, persistent_workers = (args.max_num_worker > 0) )
 
         val_metric_loader = torch.utils.data.DataLoader(dataset_Valid_metric,
             batch_size=args.batch_size, shuffle=False,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
+            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd,  persistent_workers = (args.max_num_worker > 0))
 
 
     # training parameters
@@ -130,6 +130,8 @@ def main(args):
             version=args.version,
             framerate=args.framerate,
             window_size=args.window_size_caption,
+            mapping_json=args.mapping_json,
+            feature_file=args.feature_file,
             )
 
         test_loader = torch.utils.data.DataLoader(dataset_Test,
@@ -166,7 +168,7 @@ def dvc(args):
     for arg in vars(args):
         logging.info(arg.rjust(15) + " : " + str(getattr(args, arg)))
 
-    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
 
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][0].shape[-1]
@@ -202,7 +204,7 @@ def dvc(args):
     # generate dense caption on multiple splits [test/challenge]
     for split in args.split_test:
         PredictionPath = os.path.join("models", args.model_name, f"outputs/{split}")
-        dataset_Test  = PredictionCaptions(SoccerNetPath=args.SoccerNet_path, PredictionPath=PredictionPath, features=args.features, split=[split], version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+        dataset_Test  = PredictionCaptions(SoccerNetPath=args.SoccerNet_path, PredictionPath=PredictionPath, features=args.features, split=[split], version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
 
         test_loader = torch.utils.data.DataLoader(dataset_Test,
             batch_size=args.batch_size, shuffle=False,
@@ -243,6 +245,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--SoccerNet_path',   required=False, type=str,   default="/path/to/SoccerNet/",     help='Path for SoccerNet' )
     parser.add_argument('--features',   required=False, type=str,   default="ResNET_TF2.npy",     help='Video features' )
+    parser.add_argument('--mapping_json', required=False, type=str, default="mapping.json", help='Path to memmap row mapping json')
+    parser.add_argument('--feature_file', required=False, type=str, default="features.dat", help='Path to memmap feature file')
     parser.add_argument('--max_epochs',   required=False, type=int,   default=1000,     help='Maximum number of epochs' )
     parser.add_argument('--load_weights',   required=False, type=str,   default=None,     help='weights to load' )
     parser.add_argument('--model_name',   required=False, type=str,   default="NetVLAD++",     help='named of the model to save' )
