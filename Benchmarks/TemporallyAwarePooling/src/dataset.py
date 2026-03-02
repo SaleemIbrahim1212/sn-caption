@@ -286,7 +286,7 @@ class SoccerNetCaptions(Dataset):
         self.r_pad = self.window_size_frame//2
         with open(mapping_json, "r") as f:
             self.mapping = json.load(f)
-        self.memmap = np.memmap(feature_file, mode='r', shape=(2619665,8576))
+        self.memmap = np.memmap(feature_file, mode='r', shape=(2619665,8576), dtype='float32')
 
         for game_id, game in enumerate(tqdm(self.listGames, desc="Building caption index")):
             # Load labels only (features loaded lazily in __getitem__)
@@ -432,7 +432,7 @@ class PredictionCaptions(Dataset):
         self.split = split
         with open(mapping_json, "r") as f:
             self.mapping = json.load(f)
-        self.memmap = np.memmap(feature_file, mode='r', shape=(2619665,8576))
+        self.memmap = np.memmap(feature_file, mode='r', shape=(2619665,8576), dtype='float32')
 
         
      
