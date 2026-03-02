@@ -41,10 +41,10 @@ class Transformer(nn.Module):
         self.cls_audio = nn.Parameter(torch.randn(1, 1, audio_d_model))
         audio_layer = nn.TransformerEncoderLayer(audio_d_model, audio_nhead, batch_first=True)
         self.audio_transformer = nn.TransformerEncoder(audio_layer, num_layers=audio_num_layers)
-        self.embedding_audio = nn.Embedding(audio_length, audio_d_model)
+        self.embedding_audio = nn.Embedding(audio_length+1, audio_d_model)
         self.video_proj = nn.Linear(video_feat_dim, video_d_model)
         self.cls_video = nn.Parameter(torch.randn(1, 1, video_d_model))
-        self.embedding_video = nn.Embedding(video_length, video_d_model)
+        self.embedding_video = nn.Embedding(video_length+1, video_d_model)
         video_layer = nn.TransformerEncoderLayer(video_d_model, video_nhead, batch_first=True)
         self.video_transformer = nn.TransformerEncoder(video_layer, num_layers=video_num_layers)
 
@@ -52,15 +52,17 @@ class Transformer(nn.Module):
 
         batch_audio, _ , _ = audio_feats.shape
         batch_video, _, _ = video_feats.shape 
-        x = self.audio_proj(audio_feats) + self.embedding_audio(torch.arange(self.audio_length, device=audio_feats.device)) 
+        x = self.audio_proj(audio_feats) + self.embedding_audio(torch.arange(1, audio_feats.shape[1] + 1, device=audio_feats.device))
         cls_aud = self.cls_audio.expand(batch_audio, -1, -1) 
+        cls_aud = cls_aud+ self.embedding_audio(torch.zeros(1, dtype=torch.long, device=video_feats.device))
         x = torch.concat([cls_aud, x], dim=1 )
         x  = self.audio_transformer(x) 
         audio_token  = x[:,0, :]
 
 
-        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(self.video_length, device=video_feats.device)) 
+        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(1, video_feats.shape[1] + 1, device=video_feats.device))
         cls_video = self.cls_video.expand(batch_video, -1, -1) 
+        cls_video = cls_video + self.embedding_video(torch.zeros(1, dtype=torch.long, device=video_feats.device))
         x = torch.concat([cls_video, x], dim=1 )
         x  = self.video_transformer(x)
         video_token  = x[:, 0, : ]
@@ -92,7 +94,7 @@ class Transformer_Video(nn.Module):
 
         self.video_proj = nn.Linear(video_feat_dim, video_d_model)
         self.cls_video = nn.Parameter(torch.randn(1, 1, video_d_model))
-        self.embedding_video = nn.Embedding(video_length, video_d_model)
+        self.embedding_video = nn.Embedding(video_length+1, video_d_model)
         video_layer = nn.TransformerEncoderLayer(video_d_model, video_nhead, batch_first=True)
         self.video_transformer = nn.TransformerEncoder(video_layer, num_layers=video_num_layers)
 
@@ -101,8 +103,9 @@ class Transformer_Video(nn.Module):
 
         batch_video, _, _ = video_feats.shape 
 
-        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(self.video_length, device=video_feats.device)) 
+        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(1, video_feats.shape[1] + 1, device=video_feats.device))
         cls_video = self.cls_video.expand(batch_video, -1, -1) 
+        cls_video = cls_video + self.embedding_video(torch.zeros(1, dtype=torch.long, device=video_feats.device))
         x = torch.concat([cls_video, x], dim=1 )
         x  = self.video_transformer(x)
         video_token  = x[:, 0, : ]
@@ -136,12 +139,13 @@ class Transformer_Audio(nn.Module):
         self.cls_audio = nn.Parameter(torch.randn(1, 1, audio_d_model))
         audio_layer = nn.TransformerEncoderLayer(audio_d_model, audio_nhead, batch_first=True)
         self.audio_transformer = nn.TransformerEncoder(audio_layer, num_layers=audio_num_layers)
-        self.embedding_audio = nn.Embedding(audio_length, audio_d_model)
+        self.embedding_audio = nn.Embedding(audio_length +1, audio_d_model)
     def forward(self, audio_feats):
 
         batch_audio, _ , _ = audio_feats.shape
-        x = self.audio_proj(audio_feats) + self.embedding_audio(torch.arange(self.audio_length, device=audio_feats.device)) 
+        x = self.audio_proj(audio_feats) + self.embedding_audio(torch.arange(1, audio_feats.shape[1] + 1, device=audio_feats.device))
         cls_aud = self.cls_audio.expand(batch_audio, -1, -1) 
+        cls_aud = cls_aud + self.embedding_audio(torch.zeros(1, dtype=torch.long, device=audio_feats.device))
         x = torch.concat([cls_aud, x], dim=1 )
         x  = self.audio_transformer(x) 
         audio_token  = x[:,0, :]
