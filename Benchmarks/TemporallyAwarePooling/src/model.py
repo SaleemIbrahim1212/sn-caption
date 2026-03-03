@@ -283,7 +283,7 @@ class Video2Caption(nn.Module):
             if freeze_encoder:
                 for param in self.encoder.parameters():
                     param.requires_grad = False
-    
+
     def forward(self, features, captions, lengths):
         features = self.encoder(features)
         batch_size = captions.size(0)
@@ -294,18 +294,23 @@ class Video2Caption(nn.Module):
             decoder_input = captions
             decoder_output = self.decoder(features, decoder_input, lengths)
         else:
+            features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
+            features_extracted = torch.stack([features_extracted] * self.decoder.num_layers)
+            states = (features_extracted, features_extracted)
             decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
             decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
             for t in range(0, captions.size(1)):
+                inputs = self.decoder.embed(decoder_input)
+                hiddens, states = self.decoder.lstm(inputs, states)
+                outputs = self.decoder.fc(hiddens.squeeze(1))
                 # Pass through decoder
-                decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
-                decoder_output[:, t, :] = decoder_output_t
-                # Get next input from highest predicted token
-                _, topi = decoder_output_t.topk(1)
-                decoder_input = topi.detach()  # detach from history as input
+                #decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
+                _, predicted = outputs.max(1)
+                decoder_input = predicted.unsqueeze(1)
+                decoder_output[:, t, :] = outputs  
             decoder_output = pack_padded_sequence(decoder_output, lengths, batch_first=True, enforce_sorted=False)[0]
         return decoder_output
-    
+
     def sample(self, features, max_seq_length=70):
         features = self.encoder(features.unsqueeze(0))
         return self.decoder.sample(features, max_seq_length)
@@ -350,15 +355,20 @@ class SoccerNetTransformerCaption(nn.Module):
             decoder_input = captions
             decoder_output = self.decoder(features, decoder_input, lengths)
         else:
+            #Copying what sample did here
+            features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
+            features_extracted = torch.stack([features_extracted] * self.decoder.num_layers)
+            states = (features_extracted, features_extracted)
             decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
             decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
             for t in range(0, captions.size(1)):
-                # Pass through decoder
-                decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
-                decoder_output[:, t, :] = decoder_output_t
-                # Get next input from highest predicted token
-                _, topi = decoder_output_t.topk(1)
-                decoder_input = topi.detach()  # detach from history as input
+                inputs = self.decoder.embed(decoder_input)
+                hiddens, states = self.decoder.lstm(inputs, states)
+                outputs = self.decoder.fc(hiddens.squeeze(1))
+                #decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
+                _, predicted = outputs.max(1)
+                decoder_input = predicted.unsqueeze(1)
+                decoder_output[:, t, :] = outputs  
             decoder_output = pack_padded_sequence(decoder_output, lengths, batch_first=True, enforce_sorted=False)[0]
         return decoder_output
     

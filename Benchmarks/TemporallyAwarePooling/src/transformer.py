@@ -154,3 +154,11 @@ class Transformer_Audio(nn.Module):
 
 
 
+
+if __name__ == "__main__":
+    Transformer_vid = Transformer_Video(video_feat_dim =512,video_d_model=512,video_nhead=8,video_num_layers=2,video_length=120 )
+    feat_in = torch.rand((3,120,512)) # Batches, Patches, Features
+    print("in", feat_in.shape)
+    feat_out = Transformer_vid(feat_in)
+    print("out", feat_out.shape)
+    print('result' , feat_out)
