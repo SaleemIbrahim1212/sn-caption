@@ -93,8 +93,8 @@ class Transformer_Video(nn.Module):
         self.video_length = video_length
 
         self.video_proj = nn.Linear(video_feat_dim, video_d_model)
-        self.cls_video = nn.Parameter(torch.randn(1, 1, video_d_model))
-        self.embedding_video = nn.Embedding(video_length+1, video_d_model)
+        #self.cls_video = nn.Parameter(torch.randn(1, 1, video_d_model))
+        self.embedding_video = nn.Embedding(video_length, video_d_model)
         video_layer = nn.TransformerEncoderLayer(video_d_model, video_nhead, batch_first=True)
         self.video_transformer = nn.TransformerEncoder(video_layer, num_layers=video_num_layers)
 
@@ -103,12 +103,12 @@ class Transformer_Video(nn.Module):
 
         batch_video, _, _ = video_feats.shape 
 
-        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(1, video_feats.shape[1] + 1, device=video_feats.device))
-        cls_video = self.cls_video.expand(batch_video, -1, -1) 
-        cls_video = cls_video + self.embedding_video(torch.zeros(1, dtype=torch.long, device=video_feats.device))
-        x = torch.concat([cls_video, x], dim=1 )
+        x = self.video_proj(video_feats) + self.embedding_video(torch.arange(0, video_feats.shape[1] , device=video_feats.device))
+        #cls_video = self.cls_video.expand(batch_video, -1, -1) 
+        #cls_video = cls_video + self.embedding_video(torch.zeros(1, dtype=torch.long, device=video_feats.device))
+        #x = torch.concat([cls_video, x], dim=1 )
         x  = self.video_transformer(x)
-        video_token  = x[:, 0, : ]
+        video_token  = x.mean(dim=1)
 
         return video_token
 
@@ -157,7 +157,7 @@ class Transformer_Audio(nn.Module):
 
 if __name__ == "__main__":
     Transformer_vid = Transformer_Video(video_feat_dim =512,video_d_model=512,video_nhead=8,video_num_layers=2,video_length=120 )
-    feat_in = torch.rand((3,120,512)) # Batches, Patches, Features
+    feat_in = torch.rand((3,120,512)) # Batches, video length, Features
     print("in", feat_in.shape)
     feat_out = Transformer_vid(feat_in)
     print("out", feat_out.shape)
