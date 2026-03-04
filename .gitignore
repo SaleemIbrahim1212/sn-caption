@@ -4,3 +4,6 @@ venv38/
 venv/
 wandb/
 *.pyc
+*.json
+*.log
+*.DS_Store

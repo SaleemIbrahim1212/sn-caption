@@ -7,7 +7,7 @@ from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 import torch
 
-from dataset import SoccerNetCaptions, PredictionCaptions, collate_fn_padd
+from dataset import SoccerNetCaptions, SoccerNetCaptionsMaster, PredictionCaptions, collate_fn_padd
 from model import Video2Caption, Video2CaptionWithTransformer
 from train import trainer, test_captioning, validate_captioning
 
@@ -22,12 +22,22 @@ def main(args):
     for arg in vars(args):
         logging.info(arg.rjust(15) + " : " + str(getattr(args, arg)))
 
-    # create dataset
+    # create dataset (use master embeddings when dir set and window_size=45, framerate=1)
+    use_master = bool(getattr(args, "master_embeddings_dir", None)) and args.window_size_caption == 45 and args.framerate == 1
+    if use_master:
+        master_dir = args.master_embeddings_dir
+        if not os.path.isdir(master_dir):
+            raise FileNotFoundError("Master embeddings dir not found: %s" % master_dir)
+        logging.info("Using master embeddings from %s (memmap)", master_dir)
+        _CaptionDataset = lambda **kw: SoccerNetCaptionsMaster(master_dir=master_dir, **kw)
+    else:
+        _CaptionDataset = SoccerNetCaptions
+
     if not args.test_only:
-        dataset_Train = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
-        dataset_Valid = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
-        dataset_Valid_metric  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
-    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+        dataset_Train = _CaptionDataset(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+        dataset_Valid = _CaptionDataset(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+        dataset_Valid_metric = _CaptionDataset(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+    dataset_Test = _CaptionDataset(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
 
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][0].shape[-1]
@@ -140,14 +150,14 @@ def main(args):
     # validate caption generation on groundtruth spots on multiple splits [test/challenge]
     for split in args.split_test:
 
-        dataset_Test  = SoccerNetCaptions(
+        dataset_Test = _CaptionDataset(
             path=args.SoccerNet_path,
             features=args.features,
             split=args.split_test,
             version=args.version,
             framerate=args.framerate,
             window_size=args.window_size_caption,
-            )
+        )
 
         test_loader = torch.utils.data.DataLoader(dataset_Test,
             batch_size=args.batch_size, shuffle=False,
@@ -177,7 +187,16 @@ def dvc(args):
     for arg in vars(args):
         logging.info(arg.rjust(15) + " : " + str(getattr(args, arg)))
 
-    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+    use_master = bool(getattr(args, "master_embeddings_dir", None)) and args.window_size_caption == 45 and args.framerate == 1
+    if use_master:
+        master_dir = args.master_embeddings_dir
+        if not os.path.isdir(master_dir):
+            raise FileNotFoundError("Master embeddings dir not found: %s" % master_dir)
+        _CaptionDataset = lambda **kw: SoccerNetCaptionsMaster(master_dir=master_dir, **kw)
+    else:
+        _CaptionDataset = SoccerNetCaptions
+
+    dataset_Test = _CaptionDataset(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
 
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][0].shape[-1]
@@ -285,6 +304,7 @@ if __name__ == '__main__':
     parser.add_argument('--split_test', nargs='+', default=["test", "challenge"], help='list of split for testing')
 
     parser.add_argument('--version', required=False, type=int,   default=2,     help='Version of the dataset' )
+    parser.add_argument('--master_embeddings_dir', required=False, type=str,   default=None,     help='Path to precomputed master embeddings (mapping.json + embeddings.npy). Use with window_size_caption=45 and framerate=1.' )
     parser.add_argument('--feature_dim', required=False, type=int,   default=None,     help='Number of input features' )
     parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Number of chunks per epoch' )
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )

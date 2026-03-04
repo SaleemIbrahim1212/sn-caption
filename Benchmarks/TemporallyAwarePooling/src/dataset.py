@@ -367,6 +367,128 @@ class SoccerNetCaptions(Dataset):
         string = self.text_processor.detokenize(tokens)
         return string.rstrip(f" {self.text_processor.vocab.lookup_token(EOS_TOKEN)}") if remove_EOS else string
 
+
+class SoccerNetCaptionsMaster(Dataset):
+    """
+    Caption dataset that reads precomputed embeddings from a single memory-mapped file.
+    Uses np.memmap / mmap_mode to avoid loading the full dataset into RAM and to keep
+    the GPU fed without CPU I/O bottleneck. Expects embeddings built for window_size_caption=45, 1fps.
+    """
+    def __init__(self, path, master_dir, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=1, window_size=45):
+        self.path = path
+        self.master_dir = os.path.abspath(master_dir)
+        split = [s for s in split if s != "challenge"]
+        self.listGames = getListGames(split, task="caption")
+        self.features = features
+        self.window_size_frame = window_size * framerate
+        self.framerate = framerate
+        self.version = version
+        self.labels, self.num_classes, self.dict_event, _ = getMetaDataTask("caption", "SoccerNet", version)
+
+        logging.info("Using master embeddings from %s (no feature download)", self.master_dir)
+        downloader = SoccerNetDownloader(path)
+        downloader.downloadGames(files=[self.labels], task="caption", split=split, verbose=False, randomized=True)
+
+        mapping_path = os.path.join(self.master_dir, "mapping.json")
+        if not os.path.isfile(mapping_path):
+            raise FileNotFoundError("Master mapping not found: %s" % mapping_path)
+        with open(mapping_path) as f:
+            self._mapping = json.load(f)
+
+        # Build caption index from labels only
+        self.data = list()
+        for game_id, game in enumerate(tqdm(self.listGames, desc="Building caption index")):
+            labels_path = os.path.join(self.path, game, self.labels)
+            if not os.path.isfile(labels_path):
+                logging.warning("Labels not found for %s, skipping", game)
+                continue
+            labels = json.load(open(labels_path))
+            for caption_id, annotation in enumerate(labels["annotations"]):
+                time_str = annotation["gameTime"]
+                event = annotation["label"]
+                half = int(time_str[0])
+                if event not in self.dict_event or half > 2:
+                    continue
+                minutes, seconds = time_str.split(" ")[-1].split(":")
+                minutes, seconds = int(minutes), int(seconds)
+                frame = framerate * (seconds + 60 * minutes)
+                self.data.append(((game_id, half - 1, frame), (caption_id, annotation["anonymized"])))
+
+        self.text_processor = SoccerNetTextProcessor(self.getCorpus(split=["train"]))
+        self.vocab_size = len(self.text_processor.vocab)
+
+        # Open memory-mapped embeddings
+        self._master_mmap, self._feature_dim = self._open_master_embeddings()
+
+    def _open_master_embeddings(self):
+        """Open the master embeddings file as read-only memory-mapped array."""
+        npy_path = os.path.join(self.master_dir, "embeddings.npy")
+        bin_path = os.path.join(self.master_dir, "embeddings.bin")
+        meta_path = os.path.join(self.master_dir, "metadata.json")
+
+        if os.path.isfile(npy_path):
+            arr = np.load(npy_path, mmap_mode="r")
+            if arr.ndim != 2:
+                raise ValueError("Master embeddings .npy must be 2D (total_frames, feature_dim), got shape %s" % (arr.shape,))
+            total_frames, feature_dim = arr.shape
+            logging.info("Master embeddings: %s shape=%s (memmapped)", npy_path, arr.shape)
+            return arr, feature_dim
+
+        if os.path.isfile(bin_path):
+            if not os.path.isfile(meta_path):
+                raise FileNotFoundError("embeddings.bin found but metadata.json missing in %s" % self.master_dir)
+            with open(meta_path) as f:
+                meta = json.load(f)
+            feature_dim = int(meta["feature_dim"])
+            dtype = np.dtype(meta.get("dtype", "float32"))
+            total_from_mapping = 0
+            for k, v in self._mapping.items():
+                end = v["half2_start"] + v["half2_len"]
+                total_from_mapping = max(total_from_mapping, end)
+            arr = np.memmap(bin_path, dtype=dtype, mode="r", shape=(total_from_mapping, feature_dim))
+            logging.info("Master embeddings: %s shape=(%s, %s) (memmap)", bin_path, total_from_mapping, feature_dim)
+            return arr, feature_dim
+
+        raise FileNotFoundError(
+            "No master embeddings file in %s. Expected embeddings.npy or embeddings.bin (+ metadata.json)" % self.master_dir
+        )
+
+    def getCorpus(self, split=["train"]):
+        corpus = [
+            annotation["anonymized"]
+            for game in getListGames(split, task="caption")
+            for annotation in json.load(open(os.path.join(self.path, game, self.labels)))["annotations"]
+        ]
+        return corpus
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        clip_id, (caption_id, caption) = self.data[idx]
+        game_id, half, frame = clip_id
+        key = str(game_id)
+        if key not in self._mapping:
+            raise KeyError("Game id %s not in master mapping (listGames order may not match)", game_id)
+        m = self._mapping[key]
+        if half == 0:
+            half_start = m["half1_start"]
+            half_len = m["half1_len"]
+        else:
+            half_start = m["half2_start"]
+            half_len = m["half2_len"]
+        start = min(frame, half_len - self.window_size_frame)
+        start = max(0, start)
+        end = half_start + start + self.window_size_frame
+        vfeats = np.array(self._master_mmap[half_start + start : end], dtype=np.float32, copy=True)
+        caption_tokens = self.text_processor(caption)
+        return vfeats, caption_tokens, clip_id[0], caption_id, caption
+
+    def detokenize(self, tokens, remove_EOS=True):
+        string = self.text_processor.detokenize(tokens)
+        return string.rstrip(f" {self.text_processor.vocab.lookup_token(EOS_TOKEN)}") if remove_EOS else string
+
+
 class SoccerNetVideoProcessor(object):
     """video_fn is a tuple of (video_id, half, frame)."""
 

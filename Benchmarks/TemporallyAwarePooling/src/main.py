@@ -31,6 +31,7 @@ if __name__ == '__main__':
     parser.add_argument('--split_test', nargs='+', default=["test", "challenge"], help='list of split for testing')
 
     parser.add_argument('--version', required=False, type=int,   default=2,     help='Version of the dataset' )
+    parser.add_argument('--master_embeddings_dir', required=False, type=str,   default=None,     help='Path to precomputed master embeddings for captioning (window_size_caption=45, framerate=1)' )
     parser.add_argument('--feature_dim', required=False, type=int,   default=None,     help='Number of input features' )
     parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Number of chunks per epoch' )
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )
