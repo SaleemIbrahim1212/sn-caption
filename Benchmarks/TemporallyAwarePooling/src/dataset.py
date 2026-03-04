@@ -421,37 +421,37 @@ class SoccerNetCaptionsMaster(Dataset):
         self._master_mmap, self._feature_dim = self._open_master_embeddings()
 
     def _open_master_embeddings(self):
-        """Open the master embeddings file as read-only memory-mapped array."""
-        npy_path = os.path.join(self.master_dir, "embeddings.npy")
-        bin_path = os.path.join(self.master_dir, "embeddings.bin")
-        meta_path = os.path.join(self.master_dir, "metadata.json")
-
-        if os.path.isfile(npy_path):
-            arr = np.load(npy_path, mmap_mode="r")
-            if arr.ndim != 2:
-                raise ValueError("Master embeddings .npy must be 2D (total_frames, feature_dim), got shape %s" % (arr.shape,))
-            total_frames, feature_dim = arr.shape
-            logging.info("Master embeddings: %s shape=%s (memmapped)", npy_path, arr.shape)
-            return arr, feature_dim
-
-        if os.path.isfile(bin_path):
-            if not os.path.isfile(meta_path):
-                raise FileNotFoundError("embeddings.bin found but metadata.json missing in %s" % self.master_dir)
-            with open(meta_path) as f:
-                meta = json.load(f)
-            feature_dim = int(meta["feature_dim"])
-            dtype = np.dtype(meta.get("dtype", "float32"))
-            total_from_mapping = 0
-            for k, v in self._mapping.items():
-                end = v["half2_start"] + v["half2_len"]
-                total_from_mapping = max(total_from_mapping, end)
-            arr = np.memmap(bin_path, dtype=dtype, mode="r", shape=(total_from_mapping, feature_dim))
-            logging.info("Master embeddings: %s shape=(%s, %s) (memmap)", bin_path, total_from_mapping, feature_dim)
-            return arr, feature_dim
-
-        raise FileNotFoundError(
-            "No master embeddings file in %s. Expected embeddings.npy or embeddings.bin (+ metadata.json)" % self.master_dir
-        )
+        """Open features.dat as read-only memory-mapped array.
+        File layout: row-major (total_frames, feature_dim), one row per frame.
+        mapping.json: keys are game ids ("0", "1", ...) with half1_start, half1_len, half2_start, half2_len. Optional top-level "feature_dim" and "dtype"; if feature_dim is missing, it is inferred from file size and total_frames.
+        """
+        dat_path = os.path.join(self.master_dir, "features.dat")
+        if not os.path.isfile(dat_path):
+            raise FileNotFoundError("Master embeddings not found: %s" % dat_path)
+        dtype = np.dtype(self._mapping.get("dtype", "float32"))
+        total_from_mapping = 0
+        for k, v in self._mapping.items():
+            if k in ("feature_dim", "dtype") or not isinstance(v, dict) or "half2_start" not in v:
+                continue
+            end = v["half2_start"] + v["half2_len"]
+            total_from_mapping = max(total_from_mapping, end)
+        feature_dim = self._mapping.get("feature_dim")
+        if feature_dim is not None:
+            feature_dim = int(feature_dim)
+        else:
+            # Infer from file size: file_bytes == total_frames * feature_dim * dtype.size
+            n_bytes = os.path.getsize(dat_path)
+            if total_from_mapping == 0:
+                raise ValueError("mapping.json has no game entries (half1_start, half2_start, etc.)")
+            if n_bytes % (total_from_mapping * dtype.itemsize) != 0:
+                raise ValueError(
+                    "features.dat size (%s bytes) is not divisible by total_frames (%s) * dtype size (%s); add 'feature_dim' to mapping.json" % (n_bytes, total_from_mapping, dtype.itemsize)
+                )
+            feature_dim = n_bytes // (total_from_mapping * dtype.itemsize)
+            logging.info("Inferred feature_dim=%s from features.dat size and total_frames", feature_dim)
+        arr = np.memmap(dat_path, dtype=dtype, mode="r", shape=(total_from_mapping, feature_dim))
+        logging.info("Master embeddings: %s shape=(%s, %s) (memmap)", dat_path, total_from_mapping, feature_dim)
+        return arr, feature_dim
 
     def getCorpus(self, split=["train"]):
         corpus = [
