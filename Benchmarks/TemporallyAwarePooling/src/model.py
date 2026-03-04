@@ -208,9 +208,10 @@ class DecoderRNN(nn.Module):
     def __init__(self, input_size, embed_size, hidden_size, vocab_size, num_layers=2):
         super(DecoderRNN, self).__init__()
         self.embed = nn.Embedding(vocab_size, embed_size, padding_idx=0)
+        self.input = input_size 
         self.ft_extactor_1 = nn.Linear(input_size, hidden_size)
         self.ft_extactor_2 = nn.Linear(hidden_size, hidden_size)
-        self.lstm = nn.LSTM(embed_size, hidden_size, num_layers=num_layers, batch_first=True)
+        self.lstm = nn.LSTM(embed_size +512, hidden_size, num_layers=num_layers, batch_first=True)
         self.fc = nn.Linear(hidden_size, vocab_size)
         self.dropout = nn.Dropout(0.4)
         self.activation = nn.ReLU()
@@ -218,12 +219,16 @@ class DecoderRNN(nn.Module):
     
     def forward(self, features, captions, lengths):
         #Features extraction of video encoder
-        features = self.ft_extactor_2(self.activation(self.dropout(self.ft_extactor_1(features))))
+        pass_to_lstm = torch.unsqueeze(features, dim=1)
+        features = self.ft_extactor_2(self.activation(self.dropout(self.ft_extactor_1(features)))) 
         features = torch.stack([features]*self.num_layers)
         #Embdedding
-        captions = self.embed(captions)
+        captions = self.embed(captions) 
+        pass_to_lstm =  pass_to_lstm.expand(-1,captions.shape[1], -1  )
+
         #To reduce the computation, we pack padd sequences
-        captions = pack_padded_sequence(captions, lengths, batch_first=True, enforce_sorted=False)
+        captions = torch.concat([captions, pass_to_lstm], dim=2)
+        captions = pack_padded_sequence(captions, lengths, batch_first=True, enforce_sorted=False) 
         #Video encoder features are used as initial states
         hiddens, _ = self.lstm(captions, (features, features))
         outputs = self.fc(hiddens[0])
@@ -232,6 +237,7 @@ class DecoderRNN(nn.Module):
     def sample(self, features, max_seq_length):
         sampled_ids = []
         #Features extraction of video encoder
+        pass_to_lstm = torch.unsqueeze(features, dim=1)
         features = self.ft_extactor_2(self.activation(self.dropout(self.ft_extactor_1(features))))
         features = torch.stack([features]*self.num_layers)
         #Video encoder features are used as initial states
@@ -240,6 +246,9 @@ class DecoderRNN(nn.Module):
         inputs = torch.tensor([[SOS_TOKEN]], device=features.device)
         #Start token
         inputs = self.embed(inputs)
+        pass_to_lstm = pass_to_lstm.expand(-1,inputs.shape[1], -1  )
+        inputs = torch.concat([inputs, pass_to_lstm], dim=2)
+
         #Sample at most max_seq_length token
         for i in range(max_seq_length):
             hiddens, states = self.lstm(inputs, states) 
@@ -251,6 +260,8 @@ class DecoderRNN(nn.Module):
                 #end of sampling
                 break
             inputs = self.embed(predicted).unsqueeze(1)
+            inputs = torch.concat([inputs, pass_to_lstm], dim=2)
+
         sampled_ids = torch.cat(sampled_ids)
         return sampled_ids
 
@@ -319,7 +330,7 @@ class SoccerNetTransformerCaption(nn.Module):
     def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(input_size, window_size, framerate, pool)
-        self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size, hidden_size, vocab_size, num_layers)
+        self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers)
         #self.load_weights(weights=weights)
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
         self.vocab_size = vocab_size
@@ -358,7 +369,7 @@ class SoccerNetTransformerCaption(nn.Module):
             #Copying what sample did here
             features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
             features_extracted = torch.stack([features_extracted] * self.decoder.num_layers)
-            states = (features_extracted, features_extracted)
+            states = (features_extracted, features_extracted) # to my understanding this keeps track of the words generated already 
             decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
             decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
             for t in range(0, captions.size(1)):
