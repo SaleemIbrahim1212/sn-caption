@@ -11,6 +11,7 @@ from dataset import SoccerNetClips, SoccerNetClipsTesting
 from model import Video2Spot
 from train import trainer, test_spotting
 from loss import NLLLoss
+from utils import setup_wandb_no_prompt
 
 import wandb
 
@@ -160,10 +161,12 @@ if __name__ == '__main__':
     os.makedirs(os.path.join("models", args.model_name), exist_ok=True)
     log_path = os.path.join("models", args.model_name,
                             datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log'))
-    
+
+    if not getattr(args, "no_wandb", False):
+        setup_wandb_no_prompt()
     run = wandb.init(
-    project="NetVLAD-spotting",
-    name=args.model_name
+        project="NetVLAD-spotting",
+        name=args.model_name
     )
 
     wandb.config.update(args)

@@ -11,7 +11,7 @@ from dataset import SoccerNetCaptions, SoccerNetCaptionsMaster, PredictionCaptio
 from model import Video2Caption, Video2CaptionWithTransformer
 from train import trainer, test_captioning, validate_captioning
 
-from utils import valid_probability
+from utils import valid_probability, setup_wandb_no_prompt
 
 import wandb
 
@@ -345,9 +345,11 @@ if __name__ == '__main__':
     log_path = os.path.join("models", args.model_name,
                             datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log'))
 
+    if not getattr(args, "no_wandb", False):
+        setup_wandb_no_prompt()
     run = wandb.init(
-    project="NetVLAD-caption",
-    name=args.model_name
+        project="NetVLAD-caption",
+        name=args.model_name
     )
 
     wandb.config.update(args)

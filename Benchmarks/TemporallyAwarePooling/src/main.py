@@ -6,7 +6,7 @@ import wandb
 import logging
 import time
 from datetime import datetime
-from utils import valid_probability
+from utils import valid_probability, setup_wandb_no_prompt
 import spotting
 import captioning
 
@@ -84,6 +84,8 @@ if __name__ == '__main__':
     log_path = os.path.join("models", args.model_name,
                             datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log'))
 
+    if not args.no_wandb:
+        setup_wandb_no_prompt()
     run = wandb.init(
         project="DVC-SoccerNet",
         name=args.model_name,
