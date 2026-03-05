@@ -31,15 +31,55 @@ python src/main.py \
   --features=baidu_soccer_embeddings.npy \
   --framerate 1 \
   --pool=NetVLAD \
+  --window_size_spotting=15 \
   --window_size_caption=45 \
+  --NMS_window=30 \
+  --first_stage=caption \
+  --pretrain \
+  --GPU=0 \
+  --multi_gpu \
+  --use_transformer_caption \
+  --batch_size=16 \
+  --max_num_worker=2 \
+  --split_test test \
+  --evaluation_frequency 20 \
+  --max_epochs 50 \
+
+
+  On Kaggle:
+  !/kaggle/working/venv/bin/python -u {project_path}/Benchmarks/TemporallyAwarePooling/src/main.py \
+  --SoccerNet_path={data_path} \
+  --model_name=transformer-caption \
+  --features=baidu_soccer_embeddings.npy \
   --window_size_spotting=15 \
   --NMS_window=30 \
-  --num_layers=4 \
+  --evaluation_frequency 20 \
   --first_stage=caption \
   --pretrain \
   --GPU=0 \
   --use_transformer_caption \
-  --batch_size=4 \
-  --max_num_worker=0 \
-  --split_test test
-  --no_wandb
+  --batch_size=16 \
+  --max_num_worker=4 \
+  --split_test test \
+  --multi_gpu \
+  --max_epochs 50
+
+
+Train with transformer captioning model with master embeddings:
+
+python src/main.py \
+  --SoccerNet_path=../../data/SoccerNet/caption-2024 \
+  --model_name=transformer-caption \
+  --features=baidu_soccer_embeddings.npy \
+  --framerate 1 \
+  --window_size_caption=45 \
+  --master_embeddings_dir=../../data/master/features.dat \
+  --first_stage=caption \
+  --pretrain \
+  --GPU=0 \
+  --multi_gpu \
+  --use_transformer_caption \
+  --batch_size=16 \
+  --max_num_worker=1 \
+  --evaluation_frequency 20 \
+  --max_epochs 50

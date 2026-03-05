@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import zipfile
@@ -18,7 +19,26 @@ from torch.nn.utils.rnn import pack_padded_sequence
 
 import wandb
 
+# Single shared NLGEval instance (avoids recreating and any per-call state buildup)
 caption_scorer = NLGEval(no_glove=True, no_skipthoughts=True, metrics_to_omit=['SPICE'])
+
+
+def _get_process_memory_mb():
+    """Current process memory (RSS) in MB, or None if unavailable. Works on macOS and Linux."""
+    try:
+        import psutil
+        return psutil.Process().memory_info().rss / (1024 * 1024)
+    except Exception:
+        pass
+    try:
+        import resource
+        usage = resource.getrusage(resource.RUSAGE_SELF)
+        rss = getattr(usage, "ru_maxrss", 0) or 0
+        if sys.platform == "darwin":
+            return rss / (1024 * 1024)
+        return rss / 1024
+    except Exception:
+        return None
 
 def trainer(phase, train_loader,
             val_loader,
@@ -46,9 +66,18 @@ def trainer(phase, train_loader,
         epoch_start = time.time()
         best_model_path = os.path.join("models", model_name, phase, "model.pth.tar")
 
+        # Memory logging (macOS/Linux): if "after train" grows each epoch, leak is in training; if "after validation metrics" jumps and never drops, leak is in validation.
+        mem_mb = _get_process_memory_mb()
+        if mem_mb is not None:
+            logging.info("Process memory (start of epoch %s): %.1f MB", epoch + 1, mem_mb)
+
         # train for one epoch
         loss_training = train(phase, train_loader, model, criterion,
                               optimizer, epoch + 1, train=True, device=device, run_start_time=training_start)
+
+        mem_mb = _get_process_memory_mb()
+        if mem_mb is not None:
+            logging.info("Process memory (after train): %.1f MB", mem_mb)
 
         # evaluate on validation set
         loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, device=device, run_start_time=training_start)
@@ -72,12 +101,18 @@ def trainer(phase, train_loader,
 
         # Test the model on the validation set
         if epoch % evaluation_frequency == 0 and epoch != 0:
+            mem_mb = _get_process_memory_mb()
+            if mem_mb is not None:
+                logging.info("Process memory (before validation metrics): %.1f MB", mem_mb)
             test = validate_captioning if phase == "caption" else validate_spotting
             performance_validation = test(
                 val_metric_loader,
                 model,
                 model_name,
                 device=device)
+            mem_mb = _get_process_memory_mb()
+            if mem_mb is not None:
+                logging.info("Process memory (after validation metrics): %.1f MB", mem_mb)
 
             logging.info("Validation performance at epoch " +
                          str(epoch+1) + " -> " + str(performance_validation))
@@ -122,6 +157,13 @@ def trainer(phase, train_loader,
                 f"Estimated time remaining: ~{hours}h {minutes}m "
                 f"({epochs_left} epochs at ~{avg_epoch_sec/60:.1f} min/epoch)"
             )
+
+        # Force garbage collection and return freed GPU memory to limit fragmentation
+        gc.collect()
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
+        if device.type == "mps" and hasattr(torch.mps, "empty_cache"):
+            torch.mps.empty_cache()
 
     return
 
@@ -184,6 +226,18 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, de
             # measure elapsed time
             batch_time.update(time.time() - end)
             end = time.time()
+
+            # Free batch tensors to reduce memory retention and GPU fragmentation.
+            # Must delete batch last: it holds references to feats/caption/etc., so without
+            # deleting it those tensors cannot be freed even after we del their names.
+            if phase == "caption":
+                del feats, caption, output, loss
+                if train:
+                    del target, mask
+                del lengths
+            else:
+                del feats, labels, output, loss
+            del batch
 
             n = i + 1
             total_batches = len(dataloader)
@@ -415,14 +469,14 @@ def validate_captioning(dataloader, model, model_name, device=torch.device('cpu'
             # measure data loading time
             data_time.update(time.time() - end)
             feats = feats.to(device)
-            #compute output string
+            # compute output string
             output = [dataloader.dataset.detokenize(list(model.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
-            
             all_outputs.extend(output)
             all_labels.extend(caption_or)
 
             batch_time.update(time.time() - end)
             end = time.time()
+            del feats, output
 
             desc = f'Test (cap): '
             desc += f'Time {batch_time.avg:.3f}s '
@@ -431,7 +485,14 @@ def validate_captioning(dataloader, model, model_name, device=torch.device('cpu'
             desc += f'(it:{data_time.val:.3f}s) '
             t.set_description(desc)
 
-    scores = caption_scorer.compute_metrics(ref_list=[all_labels,], hyp_list=all_outputs)
+    # Pass copies so we can clear our lists immediately and avoid keeping huge refs
+    ref_list = [list(all_labels)]
+    hyp_list = list(all_outputs)
+    scores = caption_scorer.compute_metrics(ref_list=ref_list, hyp_list=hyp_list)
+    # Release our large lists so they can be GC'd (NLGEval has its own copies if it kept any)
+    all_labels.clear()
+    all_outputs.clear()
+    del ref_list, hyp_list
     return scores
 
 def test_captioning(dataloader, model, model_name, output_filename = "results_dense_captioning.json", input_filename="results_spotting.json", device=torch.device('cpu')):

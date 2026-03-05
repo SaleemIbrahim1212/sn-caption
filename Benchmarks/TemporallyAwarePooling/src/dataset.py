@@ -480,7 +480,11 @@ class SoccerNetCaptionsMaster(Dataset):
         start = min(frame, half_len - self.window_size_frame)
         start = max(0, start)
         end = half_start + start + self.window_size_frame
-        vfeats = np.array(self._master_mmap[half_start + start : end], dtype=np.float32, copy=True)
+        # Slice memmap: return a view when dtype is float32 to avoid per-sample copies that
+        # accumulate across epochs; only copy when dtype conversion is required.
+        vfeats = self._master_mmap[half_start + start : end]
+        if vfeats.dtype != np.float32:
+            vfeats = np.ascontiguousarray(vfeats, dtype=np.float32)
         caption_tokens = self.text_processor(caption)
         return vfeats, caption_tokens, clip_id[0], caption_id, caption
 
