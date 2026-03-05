@@ -459,6 +459,7 @@ def validate_captioning(dataloader, model, model_name, device=torch.device('cpu'
     data_time = AverageMeter()
 
     model.eval()
+    model_for_sample = model.module if hasattr(model, "module") else model
 
     end = time.time()
     all_labels = []
@@ -469,8 +470,8 @@ def validate_captioning(dataloader, model, model_name, device=torch.device('cpu'
             # measure data loading time
             data_time.update(time.time() - end)
             feats = feats.to(device)
-            # compute output string
-            output = [dataloader.dataset.detokenize(list(model.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
+            # compute output string (use .module when model is DataParallel)
+            output = [dataloader.dataset.detokenize(list(model_for_sample.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
             all_outputs.extend(output)
             all_labels.extend(caption_or)
 
@@ -500,6 +501,7 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
     data_time = AverageMeter()
 
     model.eval()
+    model_for_sample = model.module if hasattr(model, "module") else model
 
     end = time.time()
     all_outputs = []
@@ -514,7 +516,7 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
             # measure data loading time
             data_time.update(time.time() - end)
             feats = feats.to(device)
-            output = [dataloader.dataset.detokenize(list(model.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
+            output = [dataloader.dataset.detokenize(list(model_for_sample.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
             
             all_outputs.extend(output)
             all_index.extend([(i.item(), j.item()) for i, j in zip(game_id, cap_id)])
