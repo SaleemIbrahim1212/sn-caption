@@ -41,8 +41,10 @@ if __name__ == '__main__':
     parser.add_argument('--NMS_threshold',       required=False, type=float,   default=0.0, help='NMS threshold for positive results' )
     parser.add_argument('--min_freq',       required=False, type=int,   default=5, help='Minimum word frequency to the vocabulary for caption generation' )
     parser.add_argument('--teacher_forcing_ratio',  required=False, type=valid_probability,   default=1, help='Teacher forcing ratio to use' )
+    parser.add_argument('--temperature',  required=False, type=float,   default=0.0, help='Caption sampling temperature (0=greedy; >0 for diversity; try 0.7–1.0 if all captions identical)' )
 
     parser.add_argument('--first_stage',  required=False, type=str,  choices=["spotting", "caption"], default="spotting")
+    parser.add_argument('--caption_only', required=False, action='store_true', help='Run only caption training/eval; skip spotting and DVC.')
     parser.add_argument('--window_size_spotting', required=False, type=int,   default=15,     help='Size of the chunk (in seconds)' )
     parser.add_argument('--window_size_caption', required=False, type=int,   default=15,     help='Size of the chunk (in seconds)' )
     parser.add_argument('--freeze_encoder',  required=False, action='store_true',  help='Perform testing only')
@@ -56,6 +58,9 @@ if __name__ == '__main__':
     parser.add_argument('--caption_d_model',  required=False, type=int, default=256, help='Transformer d_model for caption encoder')
     parser.add_argument('--caption_nhead',  required=False, type=int, default=8, help='Transformer nhead for caption encoder')
     parser.add_argument('--caption_num_encoder_layers',  required=False, type=int, default=2, help='Number of transformer encoder layers for captioning')
+    parser.add_argument('--encoder_pool',  required=False, type=str, default='first_last', choices=['mean', 'last', 'first_last'], help='Transformer aggregator pool (mean|last|first_last)' )
+    parser.add_argument('--diversity_loss_weight',  required=False, type=float, default=0.0, help='Weight for encoder diversity loss (0=off)' )
+    parser.add_argument('--diversity_temperature',  required=False, type=float, default=1.0, help='Temperature for diversity loss' )
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )
     parser.add_argument('--LR',       required=False, type=float,   default=1e-03, help='Learning Rate' )
@@ -129,7 +134,11 @@ if __name__ == '__main__':
     start=time.time()
 
     frozen = args.freeze_encoder
-    if args.first_stage == "spotting":
+    if getattr(args, 'caption_only', False):
+        logging.info('Starting main function (caption only)')
+        captioning.main(args)
+        logging.info(f'Total Execution Time is {time.time()-start} seconds')
+    elif args.first_stage == "spotting":
         logging.info('Starting main function')
         spotting.main(args)
         logging.info(f'Total Execution Time is {time.time()-start} seconds')
@@ -147,7 +156,8 @@ if __name__ == '__main__':
         args.weights_encoder = f"models/{args.model_name}/caption/model.pth.tar" if args.pretrain else None
         spotting.main(args)
         logging.info(f'Total Execution Time is {time.time()-start} seconds')
-    
-    args.weights_encoder = None
-    captioning.dvc(args)
-    logging.info(f'Total Execution Time is {time.time()-start} seconds')
+
+    if not getattr(args, 'caption_only', False):
+        args.weights_encoder = None
+        captioning.dvc(args)
+        logging.info(f'Total Execution Time is {time.time()-start} seconds')

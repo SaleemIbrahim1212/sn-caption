@@ -18,9 +18,27 @@ from nlgeval import NLGEval
 from torch.nn.utils.rnn import pack_padded_sequence
 
 import wandb
+import torch.nn.functional as F
 
 # Single shared NLGEval instance (avoids recreating and any per-call state buildup)
 caption_scorer = NLGEval(no_glove=True, no_skipthoughts=True, metrics_to_omit=['SPICE'])
+
+
+def diversity_loss(features, temperature=1.0):
+    """
+    Encourages encoder outputs in a batch to be different (reduces representation collapse).
+    features: (B, D) - batch of feature vectors (e.g. from model._encode).
+    temperature: scale for similarity (default 1.0); higher = softer penalty.
+    """
+    if features.size(0) < 2:
+        return features.new_zeros(1)
+    features_norm = F.normalize(features, dim=1)
+    sim_matrix = torch.mm(features_norm, features_norm.T)  # (B, B)
+    mask = torch.eye(features.size(0), device=features.device, dtype=torch.bool)
+    sim_matrix = sim_matrix.masked_fill(mask, 0)
+    n_pairs = features.size(0) * (features.size(0) - 1)
+    loss = (sim_matrix / max(temperature, 1e-6)).abs().sum() / n_pairs
+    return loss
 
 
 def _get_process_memory_mb():
@@ -52,7 +70,9 @@ def trainer(phase, train_loader,
             evaluation_frequency=20,
             device=torch.device('cpu'),
             start_epoch=0,
-            initial_best_loss=9e99):
+            initial_best_loss=9e99,
+            diversity_loss_weight=0.0,
+            diversity_temperature=1.0):
 
     logging.info("start training" + (f" (resuming from epoch {start_epoch})" if start_epoch > 0 else ""))
 
@@ -73,14 +93,18 @@ def trainer(phase, train_loader,
 
         # train for one epoch
         loss_training = train(phase, train_loader, model, criterion,
-                              optimizer, epoch + 1, train=True, device=device, run_start_time=training_start)
+                              optimizer, epoch + 1, train=True, device=device, run_start_time=training_start,
+                              diversity_loss_weight=diversity_loss_weight,
+                              diversity_temperature=diversity_temperature)
 
         mem_mb = _get_process_memory_mb()
         if mem_mb is not None:
             logging.info("Process memory (after train): %.1f MB", mem_mb)
 
         # evaluate on validation set
-        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, device=device, run_start_time=training_start)
+        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, device=device, run_start_time=training_start,
+                                diversity_loss_weight=diversity_loss_weight,
+                                diversity_temperature=diversity_temperature)
 
         state = {
             'epoch': epoch + 1,
@@ -167,7 +191,7 @@ def trainer(phase, train_loader,
 
     return
 
-def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, device=torch.device('cpu'), run_start_time=None):
+def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, device=torch.device('cpu'), run_start_time=None, diversity_loss_weight=0.0, diversity_temperature=1.0):
 
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -208,9 +232,15 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, de
                 
                 # compute output (audio_embeddings=None until dataset provides them)
                 audio = batch[0][2] if len(batch[0]) > 2 else None
-                output = model(feats, caption, lengths, audio_embeddings=audio)
-
-                loss = criterion(output[mask], target[mask])
+                use_diversity = diversity_loss_weight > 0 and feats.size(0) > 1
+                if use_diversity:
+                    output, encoded = model(feats, caption, lengths, audio_embeddings=audio, return_encoder_output=True)
+                    caption_loss = criterion(output[mask], target[mask])
+                    div_loss = diversity_loss(encoded, temperature=diversity_temperature)
+                    loss = caption_loss + diversity_loss_weight * div_loss
+                else:
+                    output = model(feats, caption, lengths, audio_embeddings=audio)
+                    loss = criterion(output[mask], target[mask])
             else:
                 NotImplementedError()
             
@@ -232,6 +262,8 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, de
             # deleting it those tensors cannot be freed even after we del their names.
             if phase == "caption":
                 del feats, caption, output, loss
+                if use_diversity:
+                    del encoded
                 if train:
                     del target, mask
                 del lengths
@@ -496,7 +528,7 @@ def validate_captioning(dataloader, model, model_name, device=torch.device('cpu'
     del ref_list, hyp_list
     return scores
 
-def test_captioning(dataloader, model, model_name, output_filename = "results_dense_captioning.json", input_filename="results_spotting.json", device=torch.device('cpu')):
+def test_captioning(dataloader, model, model_name, output_filename = "results_dense_captioning.json", input_filename="results_spotting.json", device=torch.device('cpu'), temperature=0.0):
     batch_time = AverageMeter()
     data_time = AverageMeter()
 
@@ -516,7 +548,7 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
             # measure data loading time
             data_time.update(time.time() - end)
             feats = feats.to(device)
-            output = [dataloader.dataset.detokenize(list(model_for_sample.sample(feats[idx]).detach().cpu())) for idx in range(feats.shape[0])]
+            output = [dataloader.dataset.detokenize(list(model_for_sample.sample(feats[idx], temperature=temperature).detach().cpu())) for idx in range(feats.shape[0])]
             
             all_outputs.extend(output)
             all_index.extend([(i.item(), j.item()) for i, j in zip(game_id, cap_id)])

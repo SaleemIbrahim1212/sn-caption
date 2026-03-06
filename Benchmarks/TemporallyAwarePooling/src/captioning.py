@@ -57,6 +57,7 @@ def main(args):
             d_model=getattr(args, 'caption_d_model', 256),
             nhead=getattr(args, 'caption_nhead', 8),
             num_encoder_layers=getattr(args, 'caption_num_encoder_layers', 2),
+            encoder_pool=getattr(args, 'encoder_pool', 'first_last'),
             audio_embed_dim=getattr(args, 'audio_embed_dim', 0),
             num_layers=args.num_layers,
             teacher_forcing_ratio=args.teacher_forcing_ratio,
@@ -132,11 +133,13 @@ def main(args):
             logging.info("Resumed from epoch %s, best_loss %.4e", start_epoch, initial_best_loss)
 
         # start training
-        trainer("caption", train_loader, val_loader, val_metric_loader, 
+        trainer("caption", train_loader, val_loader, val_metric_loader,
                 model, optimizer, scheduler, criterion,
                 model_name=args.model_name,
                 max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency, device=args.device,
-                start_epoch=start_epoch, initial_best_loss=initial_best_loss)
+                start_epoch=start_epoch, initial_best_loss=initial_best_loss,
+                diversity_loss_weight=getattr(args, 'diversity_loss_weight', 0.0),
+                diversity_temperature=getattr(args, 'diversity_temperature', 1.0))
 
     # For the best model only
     checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=args.device)
@@ -222,6 +225,7 @@ def dvc(args):
             d_model=getattr(args, 'caption_d_model', 256),
             nhead=getattr(args, 'caption_nhead', 8),
             num_encoder_layers=getattr(args, 'caption_num_encoder_layers', 2),
+            encoder_pool=getattr(args, 'encoder_pool', 'first_last'),
             audio_embed_dim=getattr(args, 'audio_embed_dim', 0),
             num_layers=args.num_layers,
             teacher_forcing_ratio=args.teacher_forcing_ratio,
@@ -258,7 +262,7 @@ def dvc(args):
             batch_size=args.batch_size, shuffle=False,
             num_workers=args.max_num_worker, pin_memory=True)
 
-        results = test_captioning(test_loader, model, args.model_name, device=args.device)
+        results = test_captioning(test_loader, model, args.model_name, device=args.device, temperature=getattr(args, 'temperature', 0.0))
         if results is None:
             continue
 
@@ -314,6 +318,10 @@ if __name__ == '__main__':
     parser.add_argument('--min_freq',       required=False, type=int,   default=5, help='Minimum word frequency to the vocabulary for caption generation' )
     
     parser.add_argument('--teacher_forcing_ratio',  required=False, type=valid_probability,   default=1, help='Teacher forcing ratio to use' )
+    parser.add_argument('--temperature',  required=False, type=float,   default=0.0, help='Caption sampling temperature (0=greedy; >0 samples from softmax for diversity; try 0.7–1.0 if all captions are identical)' )
+    parser.add_argument('--encoder_pool',  required=False, type=str, default='first_last', choices=['mean', 'last', 'first_last'], help='Transformer aggregator pool (mean|last|first_last); first_last default to reduce representation collapse' )
+    parser.add_argument('--diversity_loss_weight',  required=False, type=float, default=0.0, help='Weight for encoder diversity loss (0=off; try 0.01 to reduce representation collapse)' )
+    parser.add_argument('--diversity_temperature',  required=False, type=float, default=1.0, help='Temperature for diversity loss (higher = softer penalty)' )
     parser.add_argument('--num_layers',  required=False, type=int,   default=2, help='Teacher forcing ratio to use' )
     parser.add_argument('--freeze_encoder',  required=False, type=bool, default=False)
     parser.add_argument('--pretrain',   required=False, action='store_true',  help='Perform testing only' )

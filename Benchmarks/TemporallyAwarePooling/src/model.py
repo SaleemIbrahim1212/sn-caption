@@ -36,9 +36,10 @@ class PositionalEncoding(nn.Module):
 
 class TransformerAggregator(nn.Module):
     """
-    Replaces the pooling aggregator (e.g. NetVLAD) with a transformer encoder.
+    Transformer encoder aggregator with residual connection and LayerNorm.
     INPUT:  (batch_size, seq_len, input_size)
-    OUTPUT: (batch_size, d_model)  [mean-pooled over time]
+    OUTPUT: (batch_size, d_model)
+    pool: "mean", "last", or "first_last" (first+last projected to d_model).
     """
 
     def __init__(
@@ -49,9 +50,11 @@ class TransformerAggregator(nn.Module):
         num_encoder_layers=2,
         dim_feedforward=512,
         dropout=0.1,
+        pool="first_last",
     ):
         super(TransformerAggregator, self).__init__()
         self.d_model = d_model
+        self.pool = pool
         self.input_proj = nn.Linear(input_size, d_model) if input_size != d_model else nn.Identity()
         self.pos_encoder = PositionalEncoding(d_model, dropout=dropout)
         encoder_layer = nn.TransformerEncoderLayer(
@@ -61,16 +64,29 @@ class TransformerAggregator(nn.Module):
             dropout=dropout,
             activation="relu",
             batch_first=True,
-            norm_first=False,
+            norm_first=True,
         )
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_encoder_layers)
+        self.norm = nn.LayerNorm(d_model)
+        if pool == "first_last":
+            self.first_last_proj = nn.Linear(2 * d_model, d_model)
+        else:
+            self.first_last_proj = None
 
     def forward(self, x):
         # x: (B, T, input_size)
-        x = self.input_proj(x)  # (B, T, d_model)
-        x = self.pos_encoder(x)
+        x_proj = self.input_proj(x)  # (B, T, d_model)
+        x = self.pos_encoder(x_proj)
         x = self.transformer_encoder(x)  # (B, T, d_model)
-        x = x.mean(dim=1)  # (B, d_model)
+        x = self.norm(x + x_proj)  # residual + LayerNorm
+        if self.pool == "mean":
+            x = x.mean(dim=1)  # (B, d_model)
+        elif self.pool == "last":
+            x = x[:, -1, :]  # (B, d_model)
+        elif self.pool == "first_last":
+            x = self.first_last_proj(torch.cat([x[:, 0, :], x[:, -1, :]], dim=-1))  # (B, d_model)
+        else:
+            raise ValueError("TransformerAggregator pool must be 'mean', 'last', or 'first_last'")
         return x
 
 
@@ -225,7 +241,8 @@ class DecoderRNN(nn.Module):
         outputs = self.fc(hiddens[0])
         return outputs
     
-    def sample(self, features, max_seq_length):
+    def sample(self, features, max_seq_length, temperature=0.0):
+        """Generate caption. temperature=0.0 is greedy (argmax); temperature>0 samples from softmax(logits/temperature)."""
         sampled_ids = []
         #Features extraction of video encoder
         features = self.ft_extactor_2(self.activation(self.dropout(self.ft_extactor_1(features))))
@@ -234,17 +251,17 @@ class DecoderRNN(nn.Module):
         states = (features, features)
         #Start token
         inputs = torch.tensor([[SOS_TOKEN]], device=features.device)
-        #Start token
         inputs = self.embed(inputs)
-        #Sample at most max_seq_length token
         for i in range(max_seq_length):
-            hiddens, states = self.lstm(inputs, states) 
+            hiddens, states = self.lstm(inputs, states)
             outputs = self.fc(hiddens.squeeze(1))
-            #Sample the most likely word
-            _, predicted = outputs.max(1)
+            if temperature is not None and temperature > 0:
+                probs = F.softmax(outputs / temperature, dim=1)
+                predicted = torch.multinomial(probs, 1).squeeze(1)
+            else:
+                _, predicted = outputs.max(1)
             sampled_ids.append(predicted)
             if predicted == EOS_TOKEN:
-                #end of sampling
                 break
             inputs = self.embed(predicted).unsqueeze(1)
         sampled_ids = torch.cat(sampled_ids)
@@ -280,32 +297,34 @@ class Video2Caption(nn.Module):
                 for param in self.encoder.parameters():
                     param.requires_grad = False
     
-    def forward(self, features, captions, lengths, audio_embeddings=None):
+    def forward(self, features, captions, lengths, audio_embeddings=None, return_encoder_output=False):
         # audio_embeddings ignored (kept for API compatibility with Video2CaptionWithTransformer)
-        features = self.encoder(features)
+        encoded = self.encoder(features)
         batch_size = captions.size(0)
         captions = captions[:, :-1]  # Remove last word in caption to use as input
         use_teacher_forcing = random.random() < self.teacher_forcing_ratio
         if use_teacher_forcing:
             # Teacher forcing: Feed the target as the next input
             decoder_input = captions
-            decoder_output = self.decoder(features, decoder_input, lengths)
+            decoder_output = self.decoder(encoded, decoder_input, lengths)
         else:
             decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
             decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
             for t in range(0, captions.size(1)):
                 # Pass through decoder
-                decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
+                decoder_output_t = self.decoder(encoded, decoder_input, torch.ones_like(lengths))
                 decoder_output[:, t, :] = decoder_output_t
                 # Get next input from highest predicted token
                 _, topi = decoder_output_t.topk(1)
                 decoder_input = topi.detach()  # detach from history as input
             decoder_output = pack_padded_sequence(decoder_output, lengths.cpu(), batch_first=True, enforce_sorted=False)[0]
+        if return_encoder_output:
+            return decoder_output, encoded
         return decoder_output
 
-    def sample(self, features, max_seq_length=70):
+    def sample(self, features, max_seq_length=70, temperature=0.0):
         features = self.encoder(features.unsqueeze(0))
-        return self.decoder.sample(features, max_seq_length)
+        return self.decoder.sample(features, max_seq_length, temperature=temperature)
 
 
 ### New section: Transformer for captioning
@@ -329,6 +348,7 @@ class Video2CaptionWithTransformer(nn.Module):
         num_encoder_layers=2,
         dim_feedforward=512,
         encoder_dropout=0.1,
+        encoder_pool="first_last",
         # Late fusion (audio_embed_dim=0 means video-only for now)
         audio_embed_dim=0,
         # Decoder (same as original)
@@ -347,6 +367,7 @@ class Video2CaptionWithTransformer(nn.Module):
             num_encoder_layers=num_encoder_layers,
             dim_feedforward=dim_feedforward,
             dropout=encoder_dropout,
+            pool=encoder_pool,
         )
         self.fusion = LateFusion(
             video_dim=d_model,
@@ -375,7 +396,7 @@ class Video2CaptionWithTransformer(nn.Module):
         fused = self.fusion(video_enc, audio_embeddings)    # (B, hidden_size)
         return fused
 
-    def forward(self, features, captions, lengths, audio_embeddings=None):
+    def forward(self, features, captions, lengths, audio_embeddings=None, return_encoder_output=False):
         fused = self._encode(features, audio_embeddings)
         batch_size = captions.size(0)
         captions = captions[:, :-1]
@@ -396,13 +417,15 @@ class Video2CaptionWithTransformer(nn.Module):
             decoder_output = pack_padded_sequence(
                 decoder_output, lengths.cpu(), batch_first=True, enforce_sorted=False
             )[0]
+        if return_encoder_output:
+            return decoder_output, fused
         return decoder_output
 
-    def sample(self, features, max_seq_length=70, audio_embeddings=None):
+    def sample(self, features, max_seq_length=70, audio_embeddings=None, temperature=0.0):
         if features.dim() == 2:
             features = features.unsqueeze(0)
         fused = self._encode(features, audio_embeddings)
-        return self.decoder.sample(fused, max_seq_length)
+        return self.decoder.sample(fused, max_seq_length, temperature=temperature)
 
 class Video2Spot(nn.Module):
     def __init__(self, weights=None, input_size=512, num_classes=17, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD", weights_encoder=None, freeze_encoder=False):
