@@ -204,7 +204,17 @@ class DecoderRNN(nn.Module):
         B,L, E  = captions.shape 
         logits  = [] 
         for i in range (L):
-            word = captions[:, i , :]
+
+            '''
+            To try later :) 
+            dropout = random.random() < 0.4
+
+            if dropout:
+                word = torch.zeros_like( captions[:, i , :])
+            else: 
+                word = captions[:, i , :]
+            '''
+            word = torch.zeros_like( captions[:, i , :])
             query  = states[0][-1].unsqueeze(1) # B, 1, 512 
             context = query @  encoder_outputs.permute(0,2,1) # B, 1, 512 * B, 45, 512 
             logs = context.softmax(dim = 2) #b,1 ,45 
@@ -283,11 +293,8 @@ class Video2Caption(nn.Module):
         use_teacher_forcing = random.random() < self.teacher_forcing_ratio
         if use_teacher_forcing:
             # Teacher forcing: Feed the target as the next input
-            dropout = random.random() < 0.4
-            if dropout: 
-                decoder_input = captions
-            else:
-                decoder_input = torch.zeros_like(captions)
+            
+            decoder_input = captions
             decoder_output = self.decoder(features, decoder_input, lengths)
         else:
             features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
