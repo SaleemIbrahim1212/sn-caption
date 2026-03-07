@@ -14,6 +14,7 @@ from SoccerNet.Evaluation.DenseVideoCaptioning import evaluate as evaluate_dvc
 from torch.nn.utils.rnn import pack_padded_sequence
 from transformer import Transformer_Audio, Transformer_Video, Transformer
 from loss import ContrastiveLoss
+import torch.nn.functional as F
 
 import wandb
 
@@ -67,6 +68,10 @@ def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoc
             feats = feats.to(device)
             output_video = model_video(feats)  # this should get me the embeddings for the video, ie the token from the transformer 
             output_text = model_text(caption, lengths) # This should get me the embeddings for the text, ie the vector for the text embeddings 
+            if isinstance(output_video, tuple):
+                output_video = output_video[0]
+            if isinstance(output_text, tuple):
+                output_text = output_text[0]
             loss = criterion(output_text, output_video)
             # measure accuracy and record loss
             losses.update(loss.item(), feats.size(0))
@@ -105,6 +110,7 @@ def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoc
                 )
                 mean_off_diag = (sim.sum() - sim.diag().sum()) / (sim.numel() - sim.size(0))
                 mean_diag = sim.diag().mean()
+                top1 = (sim.argmax(dim=1) == torch.arange(sim.size(0), device=sim.device)).float().mean()
 
             desc = f'Train {epoch}: '
             desc += f'Time {batch_time.avg:.3f}s '
@@ -113,6 +119,7 @@ def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoc
             desc += f'(it:{data_time.val:.3f}s) '
             desc += f'Loss {losses.avg:.4e} '
             desc += f'Diag:{mean_diag:.3f} OffDiag:{mean_off_diag:.3f} '
+            desc += f'Top1 {top1:.4e} '
             t.set_description(desc)
 
         torch.save({

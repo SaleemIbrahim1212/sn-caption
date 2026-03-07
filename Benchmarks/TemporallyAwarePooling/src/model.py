@@ -118,6 +118,7 @@ class VideoEncoder(nn.Module):
 
 class MultimodalTransformerCaption(nn.Module):
     def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video"):
+        import os
         '''
         Same as the video encoder but we have audio and a transformer now
         Using the same recepie as above but tweaking to incorporate audio as well
@@ -134,16 +135,16 @@ class MultimodalTransformerCaption(nn.Module):
         self.input_size = input_size
         self.framerate = framerate
         self.pool = pool
-
-        # are feature alread PCA'ed?
-        if not self.input_size == 512:   
-            self.feature_extractor = nn.Linear(self.input_size, 512)
-            input_size = 512
-            self.input_size = 512
         
         if self.pool == "Transformer_Video":
-            self.pooling_layer = Transformer_Video(video_feat_dim=self.input_size, video_d_model=self.input_size, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame)
-            self.hidden_size = self.input_size
+            self.pooling_layer = Transformer_Video(video_feat_dim=self.input_size, video_d_model=512, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame)
+            path = "models/contrastive/best.pth"
+            if os.path.exists(path):
+                print("Pretrained model exists, loading")
+                self.pooling_layer.load_state_dict(torch.load(path)['model_video'])
+                for param in self.pooling_layer.parameters():
+                    param.requires_grad = False
+            self.hidden_size = 512
         elif self.pool == "Transformer_Audio":
              #TODO: @Chidi, need to get the Transformer Audio feature size! 
              self.pooling_layer = Transformer_Audio(audio_feat_dim=self.input_size, audio_d_model=self.input_size, audio_nhead=2, audio_num_layers=2, audio_length=self.window_size_frame)
@@ -159,41 +160,16 @@ class MultimodalTransformerCaption(nn.Module):
         
         elif (video_feats is not None and  audio_feats is None ):
             '''If we only have video features '''
-            BS, FR, IC = video_feats.shape
-            if not IC == 512:
-                video_feats = video_feats.reshape(BS*FR, IC)
-                video_feats = self.feature_extractor(video_feats)
-                video_feats = video_feats.reshape(BS, FR, -1)
-            cls_video_token = self.pooling_layer(video_feats)
-            return cls_video_token
+            cls_video_token, encoder_out = self.pooling_layer(video_feats  = video_feats)
+            return cls_video_token, encoder_out
         
         elif (audio_feats is not None and  video_feats is None):
             '''If we only have audio features'''
-            BS, FR, IC = audio_feats.shape
-
-            #TODO: @Chidi, how do we know the dimensions of the audio? are we PCAIng the audip? 
-            if not IC == 512:
-                audio_feats = audio_feats.reshape(BS*FR, IC)
-                audio_feats = self.feature_extractor(audio_feats)
-                audio_feats = audio_feats.reshape(BS, FR, -1)
             cls_audio_token = self.pooling_layer(audio_feats)
             return cls_audio_token
         
         elif (video_feats is not None  and audio_feats is not None):
             '''if we have both features'''
-            BS_vid, FR_vid, IC_vid = video_feats.shape
-            BS_audio, FR_audio, IC_audio = audio_feats.shape
-
-            #TODO: @Chidi, how do we know the dimensions of the audio? are we PCAIng the audip? 
-            if not IC_vid == 512:
-                video_feats = video_feats.reshape(BS_vid*FR_vid, IC_vid)
-                video_feats = self.feature_extractor(video_feats)
-                video_feats = video_feats.reshape(BS_vid, FR_vid, -1)
-            if not IC_audio == 512:
-                '''TODO: We need to know the dims of audio'''
-                audio_feats = audio_feats.reshape(BS_audio*FR_audio, IC_audio)
-                audio_feats = self.feature_extractor(audio_feats)
-                audio_feats= audio_feats.reshape(BS_vid, FR_vid, -1)
             cls_audio_token, cls_video_token = self.pooling_layer(audio_feats, video_feats )
             final_token  = torch.concat([cls_audio_token, cls_video_token], dim=1)
             return final_token
@@ -217,53 +193,58 @@ class DecoderRNN(nn.Module):
         self.activation = nn.ReLU()
         self.num_layers = num_layers
     
-    def forward(self, features, captions, lengths):
+    def forward(self, features, captions, lengths, encoder_outputs):
         #Features extraction of video encoder
-        pass_to_lstm = torch.unsqueeze(features, dim=1)
+        #pass_to_lstm = torch.unsqueeze(features, dim=1)
         features = self.ft_extactor_2(self.activation(self.dropout(self.ft_extactor_1(features)))) 
         features = torch.stack([features]*self.num_layers)
         #Embdedding
         captions = self.embed(captions) 
-        pass_to_lstm =  pass_to_lstm.expand(-1,captions.shape[1], -1  )
-
-        #To reduce the computation, we pack padd sequences
-        captions = torch.concat([captions, pass_to_lstm], dim=2)
-        captions = pack_padded_sequence(captions, lengths, batch_first=True, enforce_sorted=False) 
-        #Video encoder features are used as initial states
-        hiddens, _ = self.lstm(captions, (features, features))
-        outputs = self.fc(hiddens[0])
-        return outputs
-    
-    def sample(self, features, max_seq_length):
-        sampled_ids = []
-        #Features extraction of video encoder
-        pass_to_lstm = torch.unsqueeze(features, dim=1)
-        features = self.ft_extactor_2(self.activation(self.dropout(self.ft_extactor_1(features))))
-        features = torch.stack([features]*self.num_layers)
-        #Video encoder features are used as initial states
         states = (features, features)
-        #Start token
-        inputs = torch.tensor([[SOS_TOKEN]], device=features.device)
-        #Start token
-        inputs = self.embed(inputs)
-        pass_to_lstm = pass_to_lstm.expand(-1,inputs.shape[1], -1  )
-        inputs = torch.concat([inputs, pass_to_lstm], dim=2)
+        B,L, E  = captions.shape 
+        logits  = [] 
+        for i in range (L):
+            word = captions[:, i , :]
+            query  = states[0][-1].unsqueeze(1) # B, 1, 512 
+            context = query @  encoder_outputs.permute(0,2,1) # B, 1, 512 * B, 45, 512 
+            logs = context.softmax(dim = 2) #b,1 ,45 
+            final_context_vector  = logs @ encoder_outputs 
+            final_context_vector = final_context_vector.squeeze(1)
+            inputs  = torch.concat([word, final_context_vector] , dim=1)
+            hiddens, states = self.lstm(inputs.unsqueeze(1), states) 
+            logit = self.fc(hiddens.squeeze(1))
+            logits.append(logit)
+        outputs = torch.stack(logits, dim=1)
+        outputs = pack_padded_sequence(outputs, lengths, batch_first=True, enforce_sorted=False)[0]
+        return outputs
 
-        #Sample at most max_seq_length token
-        for i in range(max_seq_length):
-            hiddens, states = self.lstm(inputs, states) 
-            outputs = self.fc(hiddens.squeeze(1))
-            #Sample the most likely word
-            _, predicted = outputs.max(1)
+
+            
+
+    
+    def sample(self, features, encoder_outputs, max_seq_length=50):
+        sampled_ids = []
+        features = self.ft_extactor_2(self.activation(self.dropout(self.ft_extactor_1(features))))
+        features = torch.stack([features] * self.num_layers)
+        states = (features, features)
+
+        word = self.embed(torch.tensor([[SOS_TOKEN]], device=features.device)).squeeze(1)
+
+        for _ in range(max_seq_length):
+            query = states[0][-1].unsqueeze(1)
+            context = query @ encoder_outputs.permute(0, 2, 1)
+            logs = context.softmax(dim=2)
+            final_context_vector = (logs @ encoder_outputs).squeeze(1)
+            inputs = torch.cat([word, final_context_vector], dim=1)
+            hiddens, states = self.lstm(inputs.unsqueeze(1), states)
+            logit = self.fc(hiddens.squeeze(1))
+            predicted = logit.argmax(1)
             sampled_ids.append(predicted)
-            if predicted == EOS_TOKEN:
-                #end of sampling
+            if predicted.item() == EOS_TOKEN:
                 break
-            inputs = self.embed(predicted).unsqueeze(1)
-            inputs = torch.concat([inputs, pass_to_lstm], dim=2)
+            word = self.embed(predicted)
 
-        sampled_ids = torch.cat(sampled_ids)
-        return sampled_ids
+        return torch.cat(sampled_ids)
 
 class Video2Caption(nn.Module):
     def __init__(self, vocab_size, weights=None, input_size=512, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False):
@@ -302,7 +283,11 @@ class Video2Caption(nn.Module):
         use_teacher_forcing = random.random() < self.teacher_forcing_ratio
         if use_teacher_forcing:
             # Teacher forcing: Feed the target as the next input
-            decoder_input = captions
+            dropout = random.random() < 0.4
+            if dropout: 
+                decoder_input = captions
+            else:
+                decoder_input = torch.zeros_like(captions)
             decoder_output = self.decoder(features, decoder_input, lengths)
         else:
             features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
@@ -351,7 +336,7 @@ class SoccerNetTransformerCaption(nn.Module):
     def forward(self, features_video, features_audio, captions, lengths):
         if (self.encoder.pool == "Transformer_Video"):
             '''Get the cls token just for the video'''
-            features = self.encoder(features_video)
+            features, encoder_out = self.encoder(video_feats = features_video)
         elif (self.encoder.pool == "Transformer_Audio"):
             '''get the cls token just for the audio'''
             features = self.encoder( features_audio)
@@ -364,7 +349,7 @@ class SoccerNetTransformerCaption(nn.Module):
         if use_teacher_forcing:
             # Teacher forcing: Feed the target as the next input
             decoder_input = captions
-            decoder_output = self.decoder(features, decoder_input, lengths)
+            decoder_output = self.decoder(features, decoder_input, lengths, encoder_out)
         else:
             #Copying what sample did here
             features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
@@ -385,13 +370,13 @@ class SoccerNetTransformerCaption(nn.Module):
     
     def sample(self, features_video, features_audio, max_seq_length=70):
         if (self.encoder.pool == "Transformer_Video"):
-            features = self.encoder(features_video.unsqueeze(0))
+            features, encoder_output = self.encoder(video_feats = features_video.unsqueeze(0))
         elif (self.encoder.pool == "Transformer_Audio"):
             features = self.encoder(features_audio.unsqueeze(0))
         else:
             features = self.encoder(video_feats= features_video.unsqueeze(0), audio_feats = features_audio.unsqueeze(0))
 
-        return self.decoder.sample(features, max_seq_length)
+        return self.decoder.sample(features,encoder_output, max_seq_length )
  
 
 class Video2Spot(nn.Module):

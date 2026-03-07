@@ -102,15 +102,10 @@ class Transformer_Video(nn.Module):
 
 
         batch_video, _, _ = video_feats.shape 
-
         x = self.video_proj(video_feats) + self.embedding_video(torch.arange(0, video_feats.shape[1] , device=video_feats.device))
-        #cls_video = self.cls_video.expand(batch_video, -1, -1) 
-        #cls_video = cls_video + self.embedding_video(torch.zeros(1, dtype=torch.long, device=video_feats.device))
-        #x = torch.concat([cls_video, x], dim=1 )
         x  = self.video_transformer(x)
         video_token  = x.mean(dim=1)
-
-        return video_token
+        return video_token, x
 
 class Transformer_Audio(nn.Module):
     '''
