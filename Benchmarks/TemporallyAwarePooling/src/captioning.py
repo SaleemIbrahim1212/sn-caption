@@ -66,7 +66,11 @@ def main(args):
                   framerate=args.framerate,
                   pool=caption_pool,
                   num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
+                  teacher_forcing_ratio=args.teacher_forcing_ratio,
+                  freeze_encoder=args.freeze_encoder,
+                  weights_encoder=args.weights_encoder,
+                  contrastive_weights_path=args.contrastive_weights_path,
+                  freeze_contrastive_encoder=args.freeze_contrastive_encoder).to(device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -181,7 +185,11 @@ def dvc(args):
                   framerate=args.framerate,
                   pool=caption_pool,
                   num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
+                  teacher_forcing_ratio=args.teacher_forcing_ratio,
+                  freeze_encoder=args.freeze_encoder,
+                  weights_encoder=args.weights_encoder,
+                  contrastive_weights_path=args.contrastive_weights_path,
+                  freeze_contrastive_encoder=args.freeze_contrastive_encoder).to(device)
     else: 
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -272,6 +280,10 @@ if __name__ == '__main__':
     parser.add_argument('--freeze_encoder',  required=False, type=bool, default=False)
     parser.add_argument('--pretrain',   required=False, action='store_true',  help='Perform testing only' )
     parser.add_argument('--weights_encoder',  required=False, type=str, default=None)
+    parser.add_argument('--contrastive_weights_path', required=False, type=str, default=None, help='Path to contrastive encoder checkpoint to preload Transformer_Video')
+    parser.add_argument('--freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_true', help='Freeze Transformer_Video encoder after loading --contrastive_weights_path')
+    parser.add_argument('--no_freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_false', help='Do not freeze Transformer_Video encoder after loading --contrastive_weights_path')
+    parser.set_defaults(freeze_contrastive_encoder=True)
     parser.add_argument('--first_stage',  required=False, type=str,  choices=["spotting", "caption"], default="spotting")
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )

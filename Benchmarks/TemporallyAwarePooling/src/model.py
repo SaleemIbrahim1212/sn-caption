@@ -117,7 +117,7 @@ class VideoEncoder(nn.Module):
         return inputs_pooled
 
 class MultimodalTransformerCaption(nn.Module):
-    def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video"):
+    def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", contrastive_weights_path=None, freeze_contrastive_encoder=True):
         import os
         '''
         Same as the video encoder but we have audio and a transformer now
@@ -138,12 +138,18 @@ class MultimodalTransformerCaption(nn.Module):
         
         if self.pool == "Transformer_Video":
             self.pooling_layer = Transformer_Video(video_feat_dim=self.input_size, video_d_model=512, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame)
-            path = "models/contrastive/best.pth"
-            if os.path.exists(path):
-                print("Pretrained model exists, loading")
-                self.pooling_layer.load_state_dict(torch.load(path)['model_video'])
-                for param in self.pooling_layer.parameters():
-                    param.requires_grad = False
+            if contrastive_weights_path is not None:
+                if os.path.exists(contrastive_weights_path):
+                    print("Pretrained aggregator found, loading")
+                    checkpoint = torch.load(contrastive_weights_path)
+                    state_dict = checkpoint["model_video"] if isinstance(checkpoint, dict) and "model_video" in checkpoint else checkpoint
+                    self.pooling_layer.load_state_dict(state_dict)
+                    if freeze_contrastive_encoder:
+                        print("Freezing all layers")
+                        for param in self.pooling_layer.parameters():
+                            param.requires_grad = False
+                else:
+                    print(f"Could not find the pretrained aggregator so skipping preload.")
             self.hidden_size = 512
         elif self.pool == "Transformer_Audio":
              #TODO: @Chidi, need to get the Transformer Audio feature size! 
@@ -214,7 +220,7 @@ class DecoderRNN(nn.Module):
             else: 
                 word = captions[:, i , :]
             '''
-            word = torch.zeros_like( captions[:, i , :])
+            word = captions[:, i , :]
             query  = states[0][-1].unsqueeze(1) # B, 1, 512 
             context = query @  encoder_outputs.permute(0,2,1) # B, 1, 512 * B, 45, 512 
             logs = context.softmax(dim = 2) #b,1 ,45 
@@ -319,9 +325,16 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True):
         super(SoccerNetTransformerCaption, self).__init__()
-        self.encoder = MultimodalTransformerCaption(input_size, window_size, framerate, pool)
+        self.encoder = MultimodalTransformerCaption(
+            input_size=input_size,
+            window_size=window_size,
+            framerate=framerate,
+            pool=pool,
+            contrastive_weights_path=contrastive_weights_path,
+            freeze_contrastive_encoder=freeze_contrastive_encoder,
+        )
         self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers)
         #self.load_weights(weights=weights)
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
