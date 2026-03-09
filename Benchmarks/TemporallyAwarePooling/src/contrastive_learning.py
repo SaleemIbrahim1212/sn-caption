@@ -15,6 +15,8 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from transformer import Transformer_Audio, Transformer_Video, Transformer
 from loss import ContrastiveLoss
 import torch.nn.functional as F
+from sentence_transformers import SentenceTransformer
+
 
 import wandb
 
@@ -25,7 +27,7 @@ def trainer(train_loader,
             scheduler,
             model_name,
             criterion,
-            max_epochs=10,
+            max_epochs=20,
             log_every_n_batches=50):
     
     '''Borrowed code from captioning.py so we can do contrastive learning on the encoder
@@ -67,7 +69,7 @@ def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoc
             caption = caption.to(device)
             feats = feats.to(device)
             output_video = model_video(feats)  # this should get me the embeddings for the video, ie the token from the transformer 
-            output_text = model_text(caption, lengths) # This should get me the embeddings for the text, ie the vector for the text embeddings 
+            output_text = model_text(caption_or, lengths) # This should get me the embeddings for the text, ie the vector for the text embeddings 
             if isinstance(output_video, tuple):
                 output_video = output_video[0]
             if isinstance(output_text, tuple):
@@ -134,15 +136,19 @@ def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoc
 
 
 class TextEncoder(nn.Module):
-    def __init__(self, vocab_size, embed_dim, proj_dim):
+    def __init__(self, vocab_size, embed_dim, proj_dim, isFrozen=True):
         super().__init__()
-        self.embedding = nn.Embedding(embedding_dim=embed_dim, num_embeddings=vocab_size, padding_idx=0)
-        self.linear = nn.Linear(embed_dim, proj_dim)
+        self.model = SentenceTransformer("all-MiniLM-L6-v2")
+        self.linear = nn.Linear(384, proj_dim)
+
+        if isFrozen:
+            for param in self.model.parameters():
+                param.requires_grad = False
+
 
     def forward(self, caption, lengths):
-
-        x =self.embedding(caption)
-        x = x.sum(dim=1) / lengths.unsqueeze(1)
+        with torch.no_grad():
+            x = self.model.encode(caption,convert_to_tensor=True,device=self.linear.weight.device)
         x = self.linear(x)
         return x 
 
@@ -163,6 +169,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     dataset_Train = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
     model_video = Transformer_Video(video_d_model=512, video_feat_dim=8576, video_nhead=8, video_num_layers=2, video_length=45).to('cuda')
+
+
     model_text = TextEncoder(vocab_size=1769, embed_dim=256, proj_dim=512).to('cuda')
     loss = ContrastiveLoss()
     optimizer = torch.optim.Adam(list(model_video.parameters()) + list(model_text.parameters()),lr=1e-4)
