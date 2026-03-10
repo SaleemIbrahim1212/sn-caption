@@ -26,6 +26,16 @@ if caption_scorer is not None and hasattr(caption_scorer, "scorers"):
     # Disable SPICE to avoid Java/CoreNLP dependency issues.
     caption_scorer.scorers = [s for s in caption_scorer.scorers if s[1] != "SPICE"]
 
+
+def _compute_grad_l2_norm(parameters):
+    total_sq_norm = 0.0
+    for p in parameters:
+        if p.grad is None:
+            continue
+        grad_norm = p.grad.detach().data.norm(2).item()
+        total_sq_norm += grad_norm * grad_norm
+    return total_sq_norm ** 0.5
+
 def trainer(phase, train_loader,
             val_loader,
             val_metric_loader,
@@ -181,10 +191,12 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
             # measure accuracy and record loss
             losses.update(loss.item(), feats.size(0))
 
+            grad_l2_norm = None
             if train:
                 # compute gradient and do SGD step
                 optimizer.zero_grad()
                 loss.backward()
+                grad_l2_norm = _compute_grad_l2_norm(model.parameters())
                 optimizer.step()
 
             if phase == "caption" and log_every_n_batches > 0 and (i + 1) % log_every_n_batches == 0:
@@ -194,19 +206,24 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
                     f"loss={loss.item():.4f} avg_loss={losses.avg:.4f} lr={lr:.2e} "
                     f"data_t={data_time.val:.3f}s iter_t={batch_time.val:.3f}s"
                 )
+                if train and grad_l2_norm is not None:
+                    msg += f" grad_l2={grad_l2_norm:.4f}"
                 if torch.cuda.is_available():
                     mem = torch.cuda.memory_allocated() / (1024 ** 3)
                     max_mem = torch.cuda.max_memory_allocated() / (1024 ** 3)
                     msg += f" gpu_mem={mem:.2f}G max_gpu_mem={max_mem:.2f}G"
                 logging.info(msg)
                 if wandb.run is not None:
-                    wandb.log({
+                    log_payload = {
                         f"{phase}/batch_loss": float(loss.item()),
                         f"{phase}/batch_avg_loss": float(losses.avg),
                         f"{phase}/lr": float(lr),
                         "epoch": int(epoch),
                         f"{phase}/batch_idx": int(i + 1),
-                    })
+                    }
+                    if train and grad_l2_norm is not None:
+                        log_payload[f"{phase}/grad_l2"] = float(grad_l2_norm)
+                    wandb.log(log_payload)
 
             # measure elapsed time
             batch_time.update(time.time() - end)
