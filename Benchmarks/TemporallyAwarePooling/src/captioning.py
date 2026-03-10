@@ -70,7 +70,8 @@ def main(args):
                   freeze_encoder=args.freeze_encoder,
                   weights_encoder=args.weights_encoder,
                   contrastive_weights_path=args.contrastive_weights_path,
-                  freeze_contrastive_encoder=args.freeze_contrastive_encoder).to(device)
+                  freeze_contrastive_encoder=args.freeze_contrastive_encoder,
+                  unfreeze_contrastive_projection=args.unfreeze_contrastive_projection).to(device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -189,7 +190,8 @@ def dvc(args):
                   freeze_encoder=args.freeze_encoder,
                   weights_encoder=args.weights_encoder,
                   contrastive_weights_path=args.contrastive_weights_path,
-                  freeze_contrastive_encoder=args.freeze_contrastive_encoder).to(device)
+                  freeze_contrastive_encoder=args.freeze_contrastive_encoder,
+                  unfreeze_contrastive_projection=args.unfreeze_contrastive_projection).to(device)
     else: 
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -283,6 +285,7 @@ if __name__ == '__main__':
     parser.add_argument('--contrastive_weights_path', required=False, type=str, default=None, help='Path to contrastive encoder checkpoint to preload Transformer_Video')
     parser.add_argument('--freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_true', help='Freeze Transformer_Video encoder after loading --contrastive_weights_path')
     parser.add_argument('--no_freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_false', help='Do not freeze Transformer_Video encoder after loading --contrastive_weights_path')
+    parser.add_argument('--unfreeze_contrastive_projection', action='store_true', help='When --freeze_contrastive_encoder is set, keep encoder.pooling_layer.video_proj trainable')
     parser.set_defaults(freeze_contrastive_encoder=True)
     parser.add_argument('--first_stage',  required=False, type=str,  choices=["spotting", "caption"], default="spotting")
 

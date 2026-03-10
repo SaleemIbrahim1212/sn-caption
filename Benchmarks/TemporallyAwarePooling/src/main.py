@@ -51,6 +51,7 @@ if __name__ == '__main__':
     parser.add_argument('--contrastive_weights_path', required=False, type=str, default=None, help='Path to contrastive encoder checkpoint to preload Transformer_Video')
     parser.add_argument('--freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_true', help='Freeze Transformer_Video encoder after loading --contrastive_weights_path')
     parser.add_argument('--no_freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_false', help='Do not freeze Transformer_Video encoder after loading --contrastive_weights_path')
+    parser.add_argument('--unfreeze_contrastive_projection', action='store_true', help='When --freeze_contrastive_encoder is set, keep encoder.pooling_layer.video_proj trainable')
     parser.set_defaults(freeze_contrastive_encoder=True)
     parser.add_argument('--num_layers',  required=False, type=int, default=2)
     

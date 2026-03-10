@@ -117,7 +117,7 @@ class VideoEncoder(nn.Module):
         return inputs_pooled
 
 class MultimodalTransformerCaption(nn.Module):
-    def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", contrastive_weights_path=None, freeze_contrastive_encoder=True):
+    def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False):
         import os
         '''
         Same as the video encoder but we have audio and a transformer now
@@ -148,6 +148,10 @@ class MultimodalTransformerCaption(nn.Module):
                         print("Freezing all layers")
                         for param in self.pooling_layer.parameters():
                             param.requires_grad = False
+                        if unfreeze_contrastive_projection and hasattr(self.pooling_layer, "video_proj"):
+                            print("Unfreezing projection layer")
+                            for param in self.pooling_layer.video_proj.parameters():
+                                param.requires_grad = True
                 else:
                     print(f"Could not find the pretrained aggregator so skipping preload.")
             self.hidden_size = 512
@@ -325,7 +329,7 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(
             input_size=input_size,
@@ -334,6 +338,7 @@ class SoccerNetTransformerCaption(nn.Module):
             pool=pool,
             contrastive_weights_path=contrastive_weights_path,
             freeze_contrastive_encoder=freeze_contrastive_encoder,
+            unfreeze_contrastive_projection=unfreeze_contrastive_projection,
         )
         self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers)
         #self.load_weights(weights=weights)
