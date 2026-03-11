@@ -209,7 +209,13 @@ class DecoderRNN(nn.Module):
         features = self.ft_extactor_2(self.activation(self.dropout(self.ft_extactor_1(features)))) 
         features = torch.stack([features]*self.num_layers)
         #Embdedding
-        captions = self.embed(captions) 
+        captions_tokens = captions
+        captions = self.embed(captions_tokens)
+        if self.training:
+            p = 0.4
+            drop_mask = torch.rand(captions_tokens.shape, device=captions.device) < p
+            drop_mask = drop_mask & (captions_tokens != 0) & (captions_tokens != SOS_TOKEN)
+            captions = captions.masked_fill(drop_mask.unsqueeze(-1), 0.0)
         states = (features, features)
         B,L, E  = captions.shape 
         logits  = [] 
@@ -329,7 +335,7 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=1024, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(
             input_size=input_size,
