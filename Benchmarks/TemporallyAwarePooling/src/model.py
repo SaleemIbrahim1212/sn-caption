@@ -222,7 +222,7 @@ class DecoderRNN(nn.Module):
         for i in range (L):
             word = captions[:, i , :]
             query  = states[0][-1].unsqueeze(1) # B, 1, 512 
-            context = query @  encoder_outputs.permute(0,2,1) # B, 1, 512 * B, 45, 512 
+            context = query @  encoder_outputs.permute(0,2,1) / (512 ** 0.5) # B, 1, 512 * B, 45, 512 
             logs = context.softmax(dim = 2) #b,1 ,45 
             final_context_vector  = logs @ encoder_outputs 
             final_context_vector = final_context_vector.squeeze(1)
@@ -248,7 +248,7 @@ class DecoderRNN(nn.Module):
 
         for _ in range(max_seq_length):
             query = states[0][-1].unsqueeze(1)
-            context = query @ encoder_outputs.permute(0, 2, 1)
+            context = query @ encoder_outputs.permute(0, 2, 1) / (512 ** 0.5)
             logs = context.softmax(dim=2)
             final_context_vector = (logs @ encoder_outputs).squeeze(1)
             inputs = torch.cat([word, final_context_vector], dim=1)
