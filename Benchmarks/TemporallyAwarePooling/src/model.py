@@ -148,9 +148,9 @@ class MultimodalTransformerCaption(nn.Module):
                         print("Freezing all layers")
                         for param in self.pooling_layer.parameters():
                             param.requires_grad = False
-                        if unfreeze_contrastive_projection and hasattr(self.pooling_layer, "video_proj"):
-                            print("Unfreezing projection layer")
-                            for param in self.pooling_layer.video_proj.parameters():
+                        if unfreeze_contrastive_projection and hasattr(self.pooling_layer, "video_transformer"):
+                            print("unfreezing last transformer encoder block")
+                            for param in self.pooling_layer.video_transformer.layers[-1].parameters():
                                 param.requires_grad = True
                 else:
                     print(f"Could not find the pretrained aggregator so skipping preload.")
@@ -191,7 +191,7 @@ class MultimodalTransformerCaption(nn.Module):
 
 
 class DecoderRNN(nn.Module):
-    def __init__(self, input_size, embed_size, hidden_size, vocab_size, num_layers=2, word_dropout=0.4):
+    def __init__(self, input_size, embed_size, hidden_size, vocab_size, num_layers=2):
         super(DecoderRNN, self).__init__()
         self.embed = nn.Embedding(vocab_size, embed_size, padding_idx=0)
         self.input = input_size 
@@ -202,7 +202,6 @@ class DecoderRNN(nn.Module):
         self.dropout = nn.Dropout(0.4)
         self.activation = nn.ReLU()
         self.num_layers = num_layers
-        self.word_dropout = word_dropout
     
     def forward(self, features, captions, lengths, encoder_outputs):
         #Features extraction of video encoder
@@ -212,24 +211,15 @@ class DecoderRNN(nn.Module):
         #Embdedding
         captions_tokens = captions
         captions = self.embed(captions_tokens)
-        if self.training and self.word_dropout > 0:
-            drop_mask = torch.rand(captions_tokens.shape, device=captions.device) < self.word_dropout
+        if self.training:
+            p = 0.4
+            drop_mask = torch.rand(captions_tokens.shape, device=captions.device) < p
             drop_mask = drop_mask & (captions_tokens != 0) & (captions_tokens != SOS_TOKEN)
             captions = captions.masked_fill(drop_mask.unsqueeze(-1), 0.0)
         states = (features, features)
         B,L, E  = captions.shape 
         logits  = [] 
         for i in range (L):
-
-            '''
-            To try later :) 
-            dropout = random.random() < 0.4
-
-            if dropout:
-                word = torch.zeros_like( captions[:, i , :])
-            else: 
-                word = captions[:, i , :]
-            '''
             word = captions[:, i , :]
             query  = states[0][-1].unsqueeze(1) # B, 1, 512 
             context = query @  encoder_outputs.permute(0,2,1) # B, 1, 512 * B, 45, 512 
@@ -273,10 +263,10 @@ class DecoderRNN(nn.Module):
         return torch.cat(sampled_ids)
 
 class Video2Caption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, word_dropout=0.4):
+    def __init__(self, vocab_size, weights=None, input_size=512, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False):
         super(Video2Caption, self).__init__()
         self.encoder = VideoEncoder(input_size, vlad_k, window_size, framerate, pool)
-        self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size, hidden_size, vocab_size, num_layers, word_dropout=word_dropout)
+        self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size, hidden_size, vocab_size, num_layers)
         self.load_weights(weights=weights)
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
         self.vocab_size = vocab_size
@@ -335,7 +325,7 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(
             input_size=input_size,
@@ -346,7 +336,7 @@ class SoccerNetTransformerCaption(nn.Module):
             freeze_contrastive_encoder=freeze_contrastive_encoder,
             unfreeze_contrastive_projection=unfreeze_contrastive_projection,
         )
-        self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers, word_dropout=word_dropout)
+        self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers)
         #self.load_weights(weights=weights)
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
         self.vocab_size = vocab_size
