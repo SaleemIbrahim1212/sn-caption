@@ -293,9 +293,15 @@ class SoccerNetCaptions(Dataset):
             labels = json.load(open(os.path.join(self.path, game, self.labels)))
 
             for caption_id, annotation in enumerate(labels["annotations"]):
+                
 
                 time = annotation["gameTime"]
                 event = annotation["label"]
+
+                event_clean = str(event).strip().lower()
+                #Removing these labels as the paper suggested these are completely out of distribution labels 
+                if event_clean in {"funfact", "attendance"}:
+                    continue
                 half = int(time[0])
                 if event not in self.dict_event or half > 2:
                     continue
