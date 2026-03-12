@@ -67,6 +67,7 @@ def main(args):
                   pool=caption_pool,
                   num_layers=args.num_layers,
                   teacher_forcing_ratio=args.teacher_forcing_ratio,
+                  word_dropout=args.word_dropout,
                   freeze_encoder=args.freeze_encoder,
                   weights_encoder=args.weights_encoder,
                   contrastive_weights_path=args.contrastive_weights_path,
@@ -79,7 +80,7 @@ def main(args):
                     framerate=args.framerate,
                     pool=args.pool,
                     num_layers=args.num_layers,
-                    teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
+                    teacher_forcing_ratio=args.teacher_forcing_ratio, word_dropout=args.word_dropout, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
         
     logging.info(model)
     total_params = sum(p.numel()
@@ -187,6 +188,7 @@ def dvc(args):
                   pool=caption_pool,
                   num_layers=args.num_layers,
                   teacher_forcing_ratio=args.teacher_forcing_ratio,
+                  word_dropout=args.word_dropout,
                   freeze_encoder=args.freeze_encoder,
                   weights_encoder=args.weights_encoder,
                   contrastive_weights_path=args.contrastive_weights_path,
@@ -199,7 +201,7 @@ def dvc(args):
                     framerate=args.framerate,
                     pool=args.pool,
                     num_layers=args.num_layers,
-                    teacher_forcing_ratio=args.teacher_forcing_ratio).to(device)
+                    teacher_forcing_ratio=args.teacher_forcing_ratio, word_dropout=args.word_dropout).to(device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -278,6 +280,7 @@ if __name__ == '__main__':
     parser.add_argument('--min_freq',       required=False, type=int,   default=5, help='Minimum word frequency to the vocabulary for caption generation' )
     
     parser.add_argument('--teacher_forcing_ratio',  required=False, type=valid_probability,   default=1, help='Teacher forcing ratio to use' )
+    parser.add_argument('--word_dropout', required=False, type=valid_probability, default=0.4, help='Word dropout probability in decoder teacher forcing path')
     parser.add_argument('--num_layers',  required=False, type=int,   default=2, help='Teacher forcing ratio to use' )
     parser.add_argument('--freeze_encoder',  required=False, type=bool, default=False)
     parser.add_argument('--pretrain',   required=False, action='store_true',  help='Perform testing only' )

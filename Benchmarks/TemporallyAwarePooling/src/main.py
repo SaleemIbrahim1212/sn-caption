@@ -40,6 +40,7 @@ if __name__ == '__main__':
     parser.add_argument('--NMS_threshold',       required=False, type=float,   default=0.0, help='NMS threshold for positive results' )
     parser.add_argument('--min_freq',       required=False, type=int,   default=5, help='Minimum word frequency to the vocabulary for caption generation' )
     parser.add_argument('--teacher_forcing_ratio',  required=False, type=valid_probability,   default=1, help='Teacher forcing ratio to use' )
+    parser.add_argument('--word_dropout', required=False, type=valid_probability, default=0.4, help='Word dropout probability in decoder teacher forcing path')
     parser.add_argument('--caption_type', required=False, type=str, choices=['Transformer', 'Baseline', 'transformer', 'baseline'], default='Baseline', help='Caption model type')
 
     parser.add_argument('--first_stage',  required=False, type=str,  choices=["spotting", "caption"], default="spotting")
