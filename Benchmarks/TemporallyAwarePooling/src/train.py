@@ -51,11 +51,13 @@ def trainer(phase, train_loader,
     logging.info("start training")
 
     best_loss = 9e99
+    best_cider = float("-inf")
     start_epoch = 0
 
     os.makedirs(os.path.join("models", model_name, phase), exist_ok=True)
 
     best_model_path = os.path.join("models", model_name, phase, "model.pth.tar")
+    best_cider_model_path = os.path.join("models", model_name, phase, "model_best_cider.pth.tar")
     last_model_path = os.path.join("models", model_name, phase, "checkpoint_last.pth.tar")
     resume_path = last_model_path if os.path.exists(last_model_path) else best_model_path
     if os.path.exists(resume_path):
@@ -66,7 +68,8 @@ def trainer(phase, train_loader,
             optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch = checkpoint.get('epoch', 0)
         best_loss = checkpoint.get('best_loss', best_loss)
-        logging.info(f"Resumed from epoch {start_epoch}, best_loss={best_loss:.4f}")
+        best_cider = checkpoint.get('best_cider', best_cider)
+        logging.info(f"Resumed from epoch {start_epoch}, best_loss={best_loss:.4f}, best_cider={best_cider:.4f}")
         if 'scheduler' in checkpoint:
             scheduler.load_state_dict(checkpoint['scheduler'])
 
@@ -83,6 +86,7 @@ def trainer(phase, train_loader,
             'epoch': epoch + 1,
             'state_dict': model.state_dict(),
             'best_loss': best_loss,
+            'best_cider': best_cider,
             'optimizer': optimizer.state_dict(),
             'scheduler': scheduler.state_dict(),  
         }
@@ -106,6 +110,14 @@ def trainer(phase, train_loader,
                 val_metric_loader,
                 model,
                 model_name)
+
+            if phase == "caption" and "CIDEr" in performance_validation:
+                cider = float(performance_validation["CIDEr"])
+                if cider > best_cider:
+                    best_cider = cider
+                    state['best_cider'] = best_cider
+                    torch.save(state, best_cider_model_path)
+                    logging.info(f"New best CIDEr at epoch {epoch + 1}: {best_cider:.4f}. Saved to {best_cider_model_path}")
 
             logging.info("Validation performance at epoch " +
                          str(epoch+1) + " -> " + str(performance_validation))
