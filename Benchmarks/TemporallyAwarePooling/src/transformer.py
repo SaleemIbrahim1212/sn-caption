@@ -30,7 +30,7 @@ class Transformer(nn.Module):
         video_num_layers,
 
         audio_length, 
-        video_length    ):
+        video_length):
         super().__init__()
 
 
@@ -39,13 +39,13 @@ class Transformer(nn.Module):
         self.video_length = video_length
 
         self.cls_audio = nn.Parameter(torch.randn(1, 1, audio_d_model))
-        audio_layer = nn.TransformerEncoderLayer(audio_d_model, audio_nhead, batch_first=True)
+        audio_layer = nn.TransformerEncoderLayer(audio_d_model, audio_nhead, dropout=0.3, batch_first=True)
         self.audio_transformer = nn.TransformerEncoder(audio_layer, num_layers=audio_num_layers)
         self.embedding_audio = nn.Embedding(audio_length+1, audio_d_model)
         self.video_proj = nn.Linear(video_feat_dim, video_d_model)
         self.cls_video = nn.Parameter(torch.randn(1, 1, video_d_model))
         self.embedding_video = nn.Embedding(video_length+1, video_d_model)
-        video_layer = nn.TransformerEncoderLayer(video_d_model, video_nhead, batch_first=True)
+        video_layer = nn.TransformerEncoderLayer(video_d_model, video_nhead, dropout=0.3, batch_first=True)
         self.video_transformer = nn.TransformerEncoder(video_layer, num_layers=video_num_layers)
 
     def forward(self, audio_feats , video_feats):
@@ -86,7 +86,7 @@ class Transformer_Video(nn.Module):
         video_nhead,
         video_num_layers,
 
-        video_length    ):
+        video_length):
         super().__init__()
 
 
@@ -95,7 +95,7 @@ class Transformer_Video(nn.Module):
         self.video_proj = nn.Linear(video_feat_dim, video_d_model)
         #self.cls_video = nn.Parameter(torch.randn(1, 1, video_d_model))
         self.embedding_video = nn.Embedding(video_length, video_d_model)
-        video_layer = nn.TransformerEncoderLayer(video_d_model, video_nhead, batch_first=True)
+        video_layer = nn.TransformerEncoderLayer(video_d_model, video_nhead, dropout=0.3, batch_first=True)
         self.video_transformer = nn.TransformerEncoder(video_layer, num_layers=video_num_layers)
 
     def forward(self, video_feats):
@@ -125,14 +125,14 @@ class Transformer_Audio(nn.Module):
         audio_nhead,
         audio_num_layers,
 
-        audio_length, ):
+        audio_length):
         super().__init__()
 
 
         self.audio_proj = nn.Linear(audio_feat_dim, audio_d_model)
         self.audio_length = audio_length
         self.cls_audio = nn.Parameter(torch.randn(1, 1, audio_d_model))
-        audio_layer = nn.TransformerEncoderLayer(audio_d_model, audio_nhead, batch_first=True)
+        audio_layer = nn.TransformerEncoderLayer(audio_d_model, audio_nhead, dropout=0.3, batch_first=True)
         self.audio_transformer = nn.TransformerEncoder(audio_layer, num_layers=audio_num_layers)
         self.embedding_audio = nn.Embedding(audio_length +1, audio_d_model)
     def forward(self, audio_feats):

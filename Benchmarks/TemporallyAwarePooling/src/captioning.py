@@ -107,9 +107,42 @@ def main(args):
     # training parameters
     if not args.test_only:
         criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.LR, 
-                                    betas=(0.9, 0.999), eps=1e-08, 
-                                    weight_decay=0, amsgrad=False)
+        if str(args.caption_type).strip().lower() == "transformer":
+            named_params = [(name, param) for name, param in model.named_parameters() if param.requires_grad]
+            layer0_names = (
+                "encoder.pooling_layer.video_transformer.layers.0.",
+                "encoder.pooling_layer.audio_transformer.layers.0.",
+            )
+            layer1_names = (
+                "encoder.pooling_layer.video_transformer.layers.1.",
+                "encoder.pooling_layer.audio_transformer.layers.1.",
+            )
+            encoder_layer0_params = [param for name, param in named_params if any(token in name for token in layer0_names)]
+            encoder_layer1_params = [param for name, param in named_params if any(token in name for token in layer1_names)]
+            layer_param_ids = {id(p) for p in encoder_layer0_params + encoder_layer1_params}
+            other_encoder_params = [
+                param for name, param in named_params
+                if name.startswith("encoder.") and id(param) not in layer_param_ids
+            ]
+            other_params = [param for name, param in named_params if not name.startswith("encoder.")]
+            param_groups = []
+            if other_params:
+                param_groups.append({"params": other_params, "lr": args.LR})
+            if other_encoder_params:
+                param_groups.append({"params": other_encoder_params, "lr": 1e-5})
+            if encoder_layer0_params:
+                param_groups.append({"params": encoder_layer0_params, "lr": 1e-5})
+            if encoder_layer1_params:
+                param_groups.append({"params": encoder_layer1_params, "lr": 2e-5})
+            optimizer = torch.optim.Adam(param_groups, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+            logging.info(
+                "Transformer optimizer groups: non-encoder=%d (lr=%.2e), encoder other=%d (lr=1e-5), layer0=%d (lr=1e-5), layer1=%d (lr=2e-5)",
+                len(other_params), args.LR, len(other_encoder_params), len(encoder_layer0_params), len(encoder_layer1_params)
+            )
+        else:
+            optimizer = torch.optim.Adam(model.parameters(), lr=args.LR,
+                                        betas=(0.9, 0.999), eps=1e-08,
+                                        weight_decay=0, amsgrad=False)
 
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True, patience=args.patience)
@@ -289,7 +322,7 @@ if __name__ == '__main__':
     parser.add_argument('--freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_true', help='Freeze Transformer_Video encoder after loading --contrastive_weights_path')
     parser.add_argument('--no_freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_false', help='Do not freeze Transformer_Video encoder after loading --contrastive_weights_path')
     parser.add_argument('--unfreeze_contrastive_projection', action='store_true', help='When --freeze_contrastive_encoder is set, keep encoder.pooling_layer.video_proj trainable')
-    parser.set_defaults(freeze_contrastive_encoder=True)
+    parser.set_defaults(freeze_contrastive_encoder=False)
     parser.add_argument('--first_stage',  required=False, type=str,  choices=["spotting", "caption"], default="spotting")
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )
