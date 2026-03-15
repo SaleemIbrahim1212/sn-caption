@@ -46,7 +46,8 @@ def trainer(phase, train_loader,
             model_name,
             max_epochs=1000,
             evaluation_frequency=20,
-            log_every_n_batches=50):
+            log_every_n_batches=50,
+            grad_clip_norm=1.0):
 
     logging.info("start training")
 
@@ -80,10 +81,10 @@ def trainer(phase, train_loader,
         #best_model_path = os.path.join("models", model_name, phase, "model.pth.tar")
         # train for one epoch
         loss_training = train(phase, train_loader, model, criterion,
-                              optimizer, epoch + 1, train=True, log_every_n_batches=log_every_n_batches)
+                              optimizer, epoch + 1, train=True, log_every_n_batches=log_every_n_batches, grad_clip_norm=grad_clip_norm)
 
         # evaluate on validation set
-        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, log_every_n_batches=log_every_n_batches)
+        loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, log_every_n_batches=log_every_n_batches, grad_clip_norm=grad_clip_norm)
 
         state = {
             'epoch': epoch + 1,
@@ -160,7 +161,7 @@ def trainer(phase, train_loader,
 
     return
 
-def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, log_every_n_batches=50):
+def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, log_every_n_batches=50, grad_clip_norm=1.0):
     device = next(model.parameters()).device
 
     batch_time = AverageMeter()
@@ -219,6 +220,8 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
                 # compute gradient and do SGD step
                 optimizer.zero_grad()
                 loss.backward()
+                if grad_clip_norm is not None and grad_clip_norm > 0:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 grad_l2_norm = _compute_grad_l2_norm(model.parameters())
                 optimizer.step()
 
