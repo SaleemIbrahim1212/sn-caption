@@ -192,6 +192,7 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
                 (feats, caption), lengths, mask, caption_or, cap_id = batch
                 caption = caption.to(device)
                 target = caption[:, 1:] #remove SOS token
+                model_lengths = lengths
                 lengths = lengths - 1
                 #pack_padded_sequence to do less computation
                 target = pack_padded_sequence(target, lengths, batch_first=True, enforce_sorted=False)[0]
@@ -200,13 +201,13 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
                 # compute output
                 #TODO: Need to adjust the code for audio as well
                 if hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer_Video"):
-                    output = model(feats, None, caption, lengths)  # video-only transformer path
+                    output = model(feats, None, caption, model_lengths)  # video-only transformer path
                 elif hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer_Audio"):
                     raise NotImplementedError #Audio only Transformer 
                 elif hasattr(model, "encoder") and getattr(model.encoder, "pool", "").startswith("Transformer"):
                     raise NotImplementedError #Both Audio and Video Trasnformer
                 else:
-                    output = model(feats, caption, lengths)
+                    output = model(feats, caption, model_lengths)
 
                 loss = criterion(output[mask], target[mask])
             else:
