@@ -296,28 +296,35 @@ class Video2Caption(nn.Module):
         features = self.encoder(features)
         batch_size = captions.size(0)
         captions = captions[:, :-1]  # Remove last word in caption to use as input
+        decoder_lengths = [max(int(length) - 1, 1) for length in lengths]
         use_teacher_forcing = random.random() < self.teacher_forcing_ratio
         if use_teacher_forcing:
             # Teacher forcing: Feed the target as the next input
             
             decoder_input = captions
-            decoder_output = self.decoder(features, decoder_input, lengths)
+            decoder_output = self.decoder(features, decoder_input, decoder_lengths, features.unsqueeze(1))
         else:
             features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
             features_extracted = torch.stack([features_extracted] * self.decoder.num_layers)
             states = (features_extracted, features_extracted)
             decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
+            encoder_outputs = features.unsqueeze(1)
             decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
             for t in range(0, captions.size(1)):
-                inputs = self.decoder.embed(decoder_input)
-                hiddens, states = self.decoder.lstm(inputs, states)
+                word = self.decoder.embed(decoder_input).squeeze(1)
+                query = states[0][-1].unsqueeze(1)
+                context = query @ encoder_outputs.permute(0, 2, 1) / (512 ** 0.5)
+                logs = context.softmax(dim=2)
+                final_context_vector = (logs @ encoder_outputs).squeeze(1)
+                inputs = torch.cat([word, final_context_vector], dim=1)
+                hiddens, states = self.decoder.lstm(inputs.unsqueeze(1), states)
                 outputs = self.decoder.fc(hiddens.squeeze(1))
                 # Pass through decoder
                 #decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
                 _, predicted = outputs.max(1)
                 decoder_input = predicted.unsqueeze(1)
                 decoder_output[:, t, :] = outputs  
-            decoder_output = pack_padded_sequence(decoder_output, lengths, batch_first=True, enforce_sorted=False)[0]
+            decoder_output = pack_padded_sequence(decoder_output, decoder_lengths, batch_first=True, enforce_sorted=False)[0]
         return decoder_output
 
     def sample(self, features, max_seq_length=70):
@@ -325,7 +332,7 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=6e-4, teacher_forcing_min=0.2, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(
             input_size=input_size,
@@ -341,6 +348,8 @@ class SoccerNetTransformerCaption(nn.Module):
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
         self.vocab_size = vocab_size
         self.teacher_forcing_ratio = teacher_forcing_ratio
+        self.teacher_forcing_decay = teacher_forcing_decay
+        self.teacher_forcing_min = teacher_forcing_min
             
     def load_encoder(self, weights_encoder=None, freeze_encoder=False):
         if(weights_encoder is not None):
@@ -364,13 +373,17 @@ class SoccerNetTransformerCaption(nn.Module):
         else:
             '''get the cls token for the combined versions'''
             features = self.encoder(features_audio , features_video )
+            encoder_out = features.unsqueeze(1)
         batch_size = captions.size(0)
         captions = captions[:, :-1]  # Remove last word in caption to use as input
+        decoder_lengths = [max(int(length) - 1, 1) for length in lengths]
         use_teacher_forcing = random.random() < self.teacher_forcing_ratio
+        if self.training and self.teacher_forcing_decay > 0:
+            self.teacher_forcing_ratio = max(self.teacher_forcing_min, self.teacher_forcing_ratio - self.teacher_forcing_decay)
         if use_teacher_forcing:
             # Teacher forcing: Feed the target as the next input
             decoder_input = captions
-            decoder_output = self.decoder(features, decoder_input, lengths, encoder_out)
+            decoder_output = self.decoder(features, decoder_input, decoder_lengths, encoder_out)
         else:
             #Copying what sample did here
             features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
@@ -379,14 +392,19 @@ class SoccerNetTransformerCaption(nn.Module):
             decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
             decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
             for t in range(0, captions.size(1)):
-                inputs = self.decoder.embed(decoder_input)
-                hiddens, states = self.decoder.lstm(inputs, states)
+                word = self.decoder.embed(decoder_input).squeeze(1)
+                query = states[0][-1].unsqueeze(1)
+                context = query @ encoder_out.permute(0, 2, 1) / (512 ** 0.5)
+                logs = context.softmax(dim=2)
+                final_context_vector = (logs @ encoder_out).squeeze(1)
+                inputs = torch.cat([word, final_context_vector], dim=1)
+                hiddens, states = self.decoder.lstm(inputs.unsqueeze(1), states)
                 outputs = self.decoder.fc(hiddens.squeeze(1))
                 #decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
                 _, predicted = outputs.max(1)
                 decoder_input = predicted.unsqueeze(1)
                 decoder_output[:, t, :] = outputs  
-            decoder_output = pack_padded_sequence(decoder_output, lengths, batch_first=True, enforce_sorted=False)[0]
+            decoder_output = pack_padded_sequence(decoder_output, decoder_lengths, batch_first=True, enforce_sorted=False)[0]
         return decoder_output
     
     def sample(self, features_video, features_audio, max_seq_length=70):
