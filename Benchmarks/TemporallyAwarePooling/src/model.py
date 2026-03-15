@@ -332,7 +332,7 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.000038, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.0, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(
             input_size=input_size,
