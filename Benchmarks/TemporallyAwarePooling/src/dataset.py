@@ -26,6 +26,55 @@ PAD_TOKEN = 0
 SOS_TOKEN = 1
 EOS_TOKEN = 2
 
+def _infer_memmap_shape(feature_file, mapping, default_feature_dim=8576, dtype=np.float32):
+    itemsize = np.dtype(dtype).itemsize
+    file_size = os.path.getsize(feature_file)
+
+    max_end = 0
+    for entry in mapping.values():
+        try:
+            half1_end = int(entry["half1_start"]) + int(entry["half1_len"])
+            half2_end = int(entry["half2_start"]) + int(entry["half2_len"])
+            max_end = max(max_end, half1_end, half2_end)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    if max_end > 0 and file_size % (max_end * itemsize) == 0:
+        feature_dim = file_size // (max_end * itemsize)
+        if feature_dim > 0:
+            return int(max_end), int(feature_dim)
+
+    row_bytes = default_feature_dim * itemsize
+    if file_size % row_bytes != 0:
+        raise ValueError(
+            f"Cannot infer memmap shape for {feature_file}. "
+            f"file_size={file_size} is not divisible by default row_bytes={row_bytes}."
+        )
+    return int(file_size // row_bytes), int(default_feature_dim)
+
+def _build_game_to_mapping_key(mapping):
+    if not mapping:
+        return {}
+    keys = list(mapping.keys())
+    if not all(str(k).isdigit() for k in keys):
+        return {}
+    full_games = getListGames(["train", "valid", "test"], task="caption")
+    return {game: str(i) for i, game in enumerate(full_games) if str(i) in mapping}
+
+def _resolve_mapping_entry(mapping, game_name, game_id, game_to_mapping_key):
+    if game_name in mapping:
+        return mapping[game_name]
+    mapped_key = game_to_mapping_key.get(game_name)
+    if mapped_key is not None and mapped_key in mapping:
+        return mapping[mapped_key]
+    local_key = str(game_id)
+    if local_key in mapping:
+        return mapping[local_key]
+    raise KeyError(
+        f"No mapping entry found for game '{game_name}' (local id={game_id}). "
+        "Check mapping_json consistency with the selected split."
+    )
+
 def collate_fn_padd(batch):
     '''
     Padds batch of variable length
@@ -286,7 +335,9 @@ class SoccerNetCaptions(Dataset):
         self.r_pad = self.window_size_frame//2
         with open(mapping_json, "r") as f:
             self.mapping = json.load(f)
-        self.memmap = np.memmap(feature_file, mode='r', shape=(2619665,8576), dtype='float32')
+        self.game_to_mapping_key = _build_game_to_mapping_key(self.mapping)
+        memmap_rows, memmap_dim = _infer_memmap_shape(feature_file, self.mapping)
+        self.memmap = np.memmap(feature_file, mode='r', shape=(memmap_rows, memmap_dim), dtype='float32')
 
         for game_id, game in enumerate(tqdm(self.listGames, desc="Building caption index")):
             # Load labels only (features loaded lazily in __getitem__)
@@ -326,8 +377,12 @@ class SoccerNetCaptions(Dataset):
 
     def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
-
-        half1_start, half1_len, half2_start, half2_len = self.mapping[str(game_id)]['half1_start'], self.mapping[str(game_id)]['half1_len'],self.mapping[str(game_id)]['half2_start'],self.mapping[str(game_id)]['half2_len']
+        game_name = self.listGames[game_id]
+        entry = _resolve_mapping_entry(self.mapping, game_name, game_id, self.game_to_mapping_key)
+        half1_start = int(entry['half1_start'])
+        half1_len = int(entry['half1_len'])
+        half2_start = int(entry['half2_start'])
+        half2_len = int(entry['half2_len'])
         feat_half1 = self.memmap[half1_start : half1_start + half1_len]
         feat_half2 = self.memmap[half2_start: half2_start + half2_len]
 
@@ -438,7 +493,9 @@ class PredictionCaptions(Dataset):
         self.split = split
         with open(mapping_json, "r") as f:
             self.mapping = json.load(f)
-        self.memmap = np.memmap(feature_file, mode='r', shape=(2619665,8576), dtype='float32')
+        self.game_to_mapping_key = _build_game_to_mapping_key(self.mapping)
+        memmap_rows, memmap_dim = _infer_memmap_shape(feature_file, self.mapping)
+        self.memmap = np.memmap(feature_file, mode='r', shape=(memmap_rows, memmap_dim), dtype='float32')
 
         
      
@@ -480,8 +537,12 @@ class PredictionCaptions(Dataset):
 
     def _cached_load(self, game_id):
         """Load and pad features for a single game (lazy loading)."""
-
-        half1_start, half1_len, half2_start, half2_len = self.mapping[str(game_id)]['half1_start'], self.mapping[str(game_id)]['half1_len'],self.mapping[str(game_id)]['half2_start'],self.mapping[str(game_id)]['half2_len']
+        game_name = self.listGames[game_id]
+        entry = _resolve_mapping_entry(self.mapping, game_name, game_id, self.game_to_mapping_key)
+        half1_start = int(entry['half1_start'])
+        half1_len = int(entry['half1_len'])
+        half2_start = int(entry['half2_start'])
+        half2_len = int(entry['half2_len'])
         feat_half1 = self.memmap[half1_start : half1_start + half1_len]
         feat_half2 = self.memmap[half2_start: half2_start + half2_len]
 
