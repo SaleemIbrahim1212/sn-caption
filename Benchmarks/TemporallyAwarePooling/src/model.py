@@ -117,7 +117,7 @@ class VideoEncoder(nn.Module):
         return inputs_pooled
 
 class MultimodalTransformerCaption(nn.Module):
-    def __init__(self, input_size=512, window_size=15, framerate=2, vlad_k=64,  pool="Transformer_Video", contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False):
+    def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False):
         import os
         '''
         Same as the video encoder but we have audio and a transformer now
@@ -135,14 +135,9 @@ class MultimodalTransformerCaption(nn.Module):
         self.input_size = input_size
         self.framerate = framerate
         self.pool = pool
-        self.vlad_k = vlad_k
         
         if self.pool == "Transformer_Video":
             self.pooling_layer = Transformer_Video(video_feat_dim=self.input_size, video_d_model=512, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame)
-            self.pooling_layer_2 = NetVLAD(cluster_size=self.vlad_k, feature_size=self.input_size,
-                                            add_batch_norm=True)
-            self.hidden_size = input_size * self.vlad_k
-
             if contrastive_weights_path is not None:
                 if os.path.exists(contrastive_weights_path):
                     print("Pretrained aggregator found, loading")
@@ -159,7 +154,7 @@ class MultimodalTransformerCaption(nn.Module):
                                 param.requires_grad = True
                 else:
                     print(f"Could not find the pretrained aggregator so skipping preload.")
-            #self.hidden_size = 512
+            self.hidden_size = 512
         elif self.pool == "Transformer_Audio":
              #TODO: @Chidi, need to get the Transformer Audio feature size! 
              self.pooling_layer = Transformer_Audio(audio_feat_dim=self.input_size, audio_d_model=self.input_size, audio_nhead=2, audio_num_layers=2, audio_length=self.window_size_frame)
@@ -175,10 +170,8 @@ class MultimodalTransformerCaption(nn.Module):
         
         elif (video_feats is not None and  audio_feats is None ):
             '''If we only have video features '''
-            _, encoder_out = self.pooling_layer(video_feats  = video_feats)
-            video_token = self.pooling_layer_2(video_feats)
-            
-            return video_token, encoder_out
+            cls_video_token, encoder_out = self.pooling_layer(video_feats  = video_feats)
+            return cls_video_token, encoder_out
         
         elif (audio_feats is not None and  video_feats is None):
             '''If we only have audio features'''
@@ -205,7 +198,7 @@ class DecoderRNN(nn.Module):
         self.ft_extactor_1 = nn.Linear(input_size, hidden_size)
         self.ft_extactor_2 = nn.Linear(hidden_size, hidden_size)
         self.lstm = nn.LSTM(embed_size +512, hidden_size, num_layers=num_layers, batch_first=True)
-        self.fc = nn.Linear(hidden_size + 512, vocab_size)
+        self.fc = nn.Linear(hidden_size, vocab_size)
         self.dropout = nn.Dropout(0.4)
         self.activation = nn.ReLU()
         self.num_layers = num_layers
@@ -235,7 +228,7 @@ class DecoderRNN(nn.Module):
             final_context_vector = final_context_vector.squeeze(1)
             inputs  = torch.concat([word, final_context_vector] , dim=1)
             hiddens, states = self.lstm(inputs.unsqueeze(1), states) 
-            logit = self.fc(torch.cat([hiddens.squeeze(1), final_context_vector], dim=1))
+            logit = self.fc(hiddens.squeeze(1))
             logits.append(logit)
         outputs = torch.stack(logits, dim=1)
         outputs = pack_padded_sequence(outputs, lengths, batch_first=True, enforce_sorted=False)[0]
@@ -260,7 +253,7 @@ class DecoderRNN(nn.Module):
             final_context_vector = (logs @ encoder_outputs).squeeze(1)
             inputs = torch.cat([word, final_context_vector], dim=1)
             hiddens, states = self.lstm(inputs.unsqueeze(1), states)
-            logit = self.fc(torch.cat([hiddens.squeeze(1), final_context_vector], dim=1))
+            logit = self.fc(hiddens.squeeze(1))
             predicted = logit.argmax(1)
             sampled_ids.append(predicted)
             if predicted.item() == EOS_TOKEN:
@@ -325,7 +318,7 @@ class Video2Caption(nn.Module):
                 final_context_vector = (logs @ encoder_outputs).squeeze(1)
                 inputs = torch.cat([word, final_context_vector], dim=1)
                 hiddens, states = self.decoder.lstm(inputs.unsqueeze(1), states)
-                outputs = self.decoder.fc(torch.cat([hiddens.squeeze(1), final_context_vector], dim=1))
+                outputs = self.decoder.fc(hiddens.squeeze(1))
                 # Pass through decoder
                 #decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
                 _, predicted = outputs.max(1)
@@ -339,14 +332,13 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, vlad_k = 64,  framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.0, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.0, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(
             input_size=input_size,
             window_size=window_size,
             framerate=framerate,
             pool=pool,
-            vlad_k=vlad_k,
             contrastive_weights_path=contrastive_weights_path,
             freeze_contrastive_encoder=freeze_contrastive_encoder,
             unfreeze_contrastive_projection=unfreeze_contrastive_projection,
@@ -407,7 +399,7 @@ class SoccerNetTransformerCaption(nn.Module):
                 final_context_vector = (logs @ encoder_out).squeeze(1)
                 inputs = torch.cat([word, final_context_vector], dim=1)
                 hiddens, states = self.decoder.lstm(inputs.unsqueeze(1), states)
-                outputs = self.decoder.fc(torch.cat([hiddens.squeeze(1), final_context_vector], dim=1))
+                outputs = self.decoder.fc(hiddens.squeeze(1))
                 #decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
                 _, predicted = outputs.max(1)
                 decoder_input = predicted.unsqueeze(1)
