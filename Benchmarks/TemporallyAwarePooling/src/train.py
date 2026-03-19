@@ -24,6 +24,16 @@ import torch.nn.functional as F
 caption_scorer = NLGEval(no_glove=True, no_skipthoughts=True, metrics_to_omit=['SPICE'])
 
 
+def _compute_grad_l2_norm(parameters):
+    total_sq_norm = 0.0
+    for p in parameters:
+        if p.grad is None:
+            continue
+        grad_norm = p.grad.detach().data.norm(2).item()
+        total_sq_norm += grad_norm * grad_norm
+    return total_sq_norm ** 0.5
+
+
 def diversity_loss(features, temperature=1.0):
     """
     Encourages encoder outputs in a batch to be different (reduces representation collapse).
@@ -68,6 +78,7 @@ def trainer(phase, train_loader,
             model_name,
             max_epochs=1000,
             evaluation_frequency=20,
+            log_every_n_batches=50,
             device=torch.device('cpu'),
             start_epoch=0,
             initial_best_loss=9e99,
@@ -94,6 +105,7 @@ def trainer(phase, train_loader,
         # train for one epoch
         loss_training = train(phase, train_loader, model, criterion,
                               optimizer, epoch + 1, train=True, device=device, run_start_time=training_start,
+                              log_every_n_batches=log_every_n_batches,
                               diversity_loss_weight=diversity_loss_weight,
                               diversity_temperature=diversity_temperature)
 
@@ -103,6 +115,7 @@ def trainer(phase, train_loader,
 
         # evaluate on validation set
         loss_validation = train(phase, val_loader, model, criterion, optimizer, epoch + 1, train=False, device=device, run_start_time=training_start,
+                                log_every_n_batches=log_every_n_batches,
                                 diversity_loss_weight=diversity_loss_weight,
                                 diversity_temperature=diversity_temperature)
 
@@ -191,7 +204,7 @@ def trainer(phase, train_loader,
 
     return
 
-def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, device=torch.device('cpu'), run_start_time=None, diversity_loss_weight=0.0, diversity_temperature=1.0):
+def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, device=torch.device('cpu'), run_start_time=None, log_every_n_batches=50, diversity_loss_weight=0.0, diversity_temperature=1.0):
 
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -247,11 +260,39 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, de
             # measure accuracy and record loss
             losses.update(loss.item(), feats.size(0))
 
+            grad_l2_norm = None
             if train:
                 # compute gradient and do SGD step
                 optimizer.zero_grad()
                 loss.backward()
+                grad_l2_norm = _compute_grad_l2_norm(model.parameters())
                 optimizer.step()
+
+            if phase == "caption" and log_every_n_batches > 0 and (i + 1) % log_every_n_batches == 0:
+                lr = optimizer.param_groups[0]["lr"] if optimizer is not None else -1.0
+                msg = (
+                    f"[{phase}] epoch={epoch} batch={i + 1}/{len(dataloader)} "
+                    f"loss={loss.item():.4f} avg_loss={losses.avg:.4f} lr={lr:.2e} "
+                    f"data_t={data_time.val:.3f}s iter_t={batch_time.val:.3f}s"
+                )
+                if train and grad_l2_norm is not None:
+                    msg += f" grad_l2={grad_l2_norm:.4f}"
+                if device.type == "cuda" and torch.cuda.is_available():
+                    mem = torch.cuda.memory_allocated() / (1024 ** 3)
+                    max_mem = torch.cuda.max_memory_allocated() / (1024 ** 3)
+                    msg += f" gpu_mem={mem:.2f}G max_gpu_mem={max_mem:.2f}G"
+                logging.info(msg)
+                if wandb.run is not None:
+                    log_payload = {
+                        f"{phase}/batch_loss": float(loss.item()),
+                        f"{phase}/batch_avg_loss": float(losses.avg),
+                        f"{phase}/lr": float(lr),
+                        "epoch": int(epoch),
+                        f"{phase}/batch_idx": int(i + 1),
+                    }
+                    if train and grad_l2_norm is not None:
+                        log_payload[f"{phase}/grad_l2"] = float(grad_l2_norm)
+                    wandb.log(log_payload)
 
             # measure elapsed time
             batch_time.update(time.time() - end)

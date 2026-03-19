@@ -1,12 +1,13 @@
+import os
+
 import numpy as np
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
-import os
 import torch
 import wandb
 import logging
 import time
 from datetime import datetime
-from utils import valid_probability, setup_wandb_no_prompt
+from utils import valid_probability
 import spotting
 import captioning
 
@@ -34,6 +35,7 @@ if __name__ == '__main__':
     parser.add_argument('--master_embeddings_dir', required=False, type=str,   default=None,     help='Path to precomputed master embeddings for captioning (window_size_caption=45, framerate=1)' )
     parser.add_argument('--feature_dim', required=False, type=int,   default=None,     help='Number of input features' )
     parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Number of chunks per epoch' )
+    parser.add_argument('--log_every_n_batches', required=False, type=int,   default=50,     help='Log caption batch stats to wandb every N batches (0 to disable)' )
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )
     parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool' )
     parser.add_argument('--vlad_k',       required=False, type=int,   default=64, help='Size of the vocabulary for NetVLAD' )
@@ -73,7 +75,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
 
     parser.add_argument('--loglevel',   required=False, type=str,   default='INFO', help='logging level')
-    parser.add_argument('--no_wandb',  required=False, action='store_true', help='Disable Weights & Biases logging (e.g. for non-interactive runs on Kaggle)')
+    parser.add_argument('--no_wandb',  required=False, action='store_true', help='Disable Weights & Biases logging')
 
     args = parser.parse_args()
 
@@ -89,13 +91,11 @@ if __name__ == '__main__':
     log_path = os.path.join("models", args.model_name,
                             datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log'))
 
-    if not args.no_wandb:
-        setup_wandb_no_prompt()
+    _wandb_mode = "disabled" if args.no_wandb else "online"
     run = wandb.init(
         project="DVC-SoccerNet",
         name=args.model_name,
-        entity="salma-nassri-university",
-        mode="disabled" if args.no_wandb else "online",
+        mode=_wandb_mode,
     )
 
     wandb.config.update(args)
@@ -137,6 +137,10 @@ if __name__ == '__main__':
     if getattr(args, 'caption_only', False):
         logging.info('Starting main function (caption only)')
         captioning.main(args)
+        logging.info(f'Total Execution Time is {time.time()-start} seconds')
+        # Run DVC to write caption files (uses existing spotting results in models/<model_name>/outputs/<split>/<game>/results_spotting.json)
+        args.weights_encoder = None
+        captioning.dvc(args)
         logging.info(f'Total Execution Time is {time.time()-start} seconds')
     elif args.first_stage == "spotting":
         logging.info('Starting main function')

@@ -10,25 +10,6 @@ import glob
 import argparse
 
 
-def setup_wandb_no_prompt():
-    """
-    Avoid wandb login prompt when running non-interactively (e.g. on Kaggle).
-    - If WANDB_API_KEY is set (e.g. from Kaggle Secrets), log in with it.
-    - If on Kaggle and no key is set, use offline mode so no prompt.
-    Call this before wandb.init().
-
-    On Kaggle: Add your wandb API key in Settings -> Add-ons -> Secrets
-    (name: WANDB_API_KEY). Then in your notebook, before running training:
-      from kaggle_secrets import UserSecretsClient
-      import os
-      os.environ["WANDB_API_KEY"] = UserSecretsClient().get_secret("WANDB_API_KEY")
-    """
-    import wandb
-    if os.environ.get("WANDB_API_KEY"):
-        wandb.login(key=os.environ["WANDB_API_KEY"], relogin=False)
-    elif os.environ.get("KAGGLE_KERNEL_RUN_TYPE"):
-        os.environ.setdefault("WANDB_MODE", "offline")
-
 def evaluate(SoccerNet_path, Predictions_path, prediction_file="results_spotting.json", split="test", version=2, framerate=2, metric="loose"):
     # evaluate the prediction with respect to some ground truth
     # Params:

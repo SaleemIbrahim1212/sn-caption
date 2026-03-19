@@ -27,6 +27,49 @@ PAD_TOKEN = 0
 SOS_TOKEN = 1
 EOS_TOKEN = 2
 
+
+def _build_game_to_mapping_key(mapping):
+    """
+    Build game_name -> mapping_key when mapping uses numeric-string keys.
+    Assumes numeric keys follow global getListGames(["train","valid","test"], task="caption") order.
+    """
+    if not isinstance(mapping, dict):
+        return {}
+    keys = [k for k, v in mapping.items() if isinstance(v, dict)]
+    if not keys or not all(str(k).isdigit() for k in keys):
+        return {}
+    full_games = getListGames(["train", "valid", "test"], task="caption")
+    return {game: str(i) for i, game in enumerate(full_games) if str(i) in mapping}
+
+
+def _resolve_mapping_entry(mapping, game_name, game_id, game_to_mapping_key):
+    """
+    Resolve mapping entry robustly across:
+      1) mapping keyed by game name,
+      2) mapping keyed by global numeric ids,
+      3) mapping keyed by local split ids (fallback).
+    """
+    if game_name in mapping and isinstance(mapping[game_name], dict):
+        return mapping[game_name]
+    mapped_key = game_to_mapping_key.get(game_name)
+    if mapped_key is not None and mapped_key in mapping and isinstance(mapping[mapped_key], dict):
+        return mapping[mapped_key]
+    local_key = str(game_id)
+    if local_key in mapping and isinstance(mapping[local_key], dict):
+        return mapping[local_key]
+    raise KeyError(
+        "No mapping entry found for game '%s' (local id=%s). "
+        "Check mapping.json consistency with getListGames ordering." % (game_name, game_id)
+    )
+
+
+def _ensure_writable(arr):
+    """Copy NumPy arrays that are read-only (e.g. memmap views) so PyTorch does not warn."""
+    if isinstance(arr, np.ndarray) and not arr.flags.writeable:
+        return np.asarray(arr, dtype=arr.dtype).copy()
+    return arr
+
+
 def collate_fn_padd(batch):
     '''
     Padds batch of variable length
@@ -44,7 +87,9 @@ def collate_fn_padd(batch):
     tokens = torch.nn.utils.rnn.pad_sequence(tokens, batch_first=True)
     ## compute mask
     mask = (tokens != PAD_TOKEN)
-    return default_collate([t[:-4] for t in batch ]) + [tokens], lengths, mask, captions, idx
+    # Copy read-only arrays (e.g. from memmap) so default_collate -> torch.as_tensor does not warn
+    batch_collate = [tuple(_ensure_writable(x) for x in t[:-4]) for t in batch]
+    return default_collate(batch_collate) + [tokens], lengths, mask, captions, idx
 
 
 def feats2clip(feats, stride, clip_length, padding = "replicate_last", off=0):
@@ -394,6 +439,7 @@ class SoccerNetCaptionsMaster(Dataset):
             raise FileNotFoundError("Master mapping not found: %s" % mapping_path)
         with open(mapping_path) as f:
             self._mapping = json.load(f)
+        self._game_to_mapping_key = _build_game_to_mapping_key(self._mapping)
 
         # Build caption index from labels only
         self.data = list()
@@ -467,10 +513,8 @@ class SoccerNetCaptionsMaster(Dataset):
     def __getitem__(self, idx):
         clip_id, (caption_id, caption) = self.data[idx]
         game_id, half, frame = clip_id
-        key = str(game_id)
-        if key not in self._mapping:
-            raise KeyError("Game id %s not in master mapping (listGames order may not match)", game_id)
-        m = self._mapping[key]
+        game_name = self.listGames[game_id]
+        m = _resolve_mapping_entry(self._mapping, game_name, game_id, self._game_to_mapping_key)
         if half == 0:
             half_start = m["half1_start"]
             half_len = m["half1_len"]

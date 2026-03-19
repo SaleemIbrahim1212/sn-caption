@@ -340,6 +340,7 @@ class Video2CaptionWithTransformer(nn.Module):
         vocab_size,
         weights=None,
         input_size=512,
+        vlad_k=64,
         window_size=15,
         framerate=2,
         # Transformer aggregator
@@ -349,6 +350,9 @@ class Video2CaptionWithTransformer(nn.Module):
         dim_feedforward=512,
         encoder_dropout=0.1,
         encoder_pool="first_last",
+        # Optional NetVLAD branch to fuse with transformer aggregator
+        netvlad_pool="NetVLAD",
+        use_netvlad_branch=True,
         # Late fusion (audio_embed_dim=0 means video-only for now)
         audio_embed_dim=0,
         # Decoder (same as original)
@@ -360,6 +364,8 @@ class Video2CaptionWithTransformer(nn.Module):
         freeze_encoder=False,
     ):
         super(Video2CaptionWithTransformer, self).__init__()
+        self.use_netvlad_branch = use_netvlad_branch
+
         self.video_aggregator = TransformerAggregator(
             input_size=input_size,
             d_model=d_model,
@@ -369,8 +375,22 @@ class Video2CaptionWithTransformer(nn.Module):
             dropout=encoder_dropout,
             pool=encoder_pool,
         )
+
+        # Optional NetVLAD (or related) pooling branch on raw frame features
+        netvlad_hidden = 0
+        if self.use_netvlad_branch:
+            self.netvlad_encoder = VideoEncoder(
+                input_size=input_size,
+                vlad_k=vlad_k,
+                window_size=window_size,
+                framerate=framerate,
+                pool=netvlad_pool,
+            )
+            netvlad_hidden = self.netvlad_encoder.hidden_size
+
+        video_dim = d_model + netvlad_hidden
         self.fusion = LateFusion(
-            video_dim=d_model,
+            video_dim=video_dim,
             hidden_size=hidden_size,
             audio_dim=audio_embed_dim,
         )
@@ -381,6 +401,9 @@ class Video2CaptionWithTransformer(nn.Module):
         if freeze_encoder:
             for param in self.video_aggregator.parameters():
                 param.requires_grad = False
+            if self.use_netvlad_branch:
+                for param in self.netvlad_encoder.parameters():
+                    param.requires_grad = False
 
         self.load_weights(weights=weights)
 
@@ -393,6 +416,10 @@ class Video2CaptionWithTransformer(nn.Module):
 
     def _encode(self, video_features, audio_embeddings=None):
         video_enc = self.video_aggregator(video_features)  # (B, d_model)
+        if self.use_netvlad_branch:
+            # NetVLAD branch pools raw frame features to a high-dimensional vector
+            vlad_enc = self.netvlad_encoder(video_features)  # (B, netvlad_hidden)
+            video_enc = torch.cat([video_enc, vlad_enc], dim=-1)
         fused = self.fusion(video_enc, audio_embeddings)    # (B, hidden_size)
         return fused
 

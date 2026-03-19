@@ -11,7 +11,6 @@ from dataset import SoccerNetClips, SoccerNetClipsTesting
 from model import Video2Spot
 from train import trainer, test_spotting
 from loss import NLLLoss
-from utils import setup_wandb_no_prompt
 
 import wandb
 
@@ -147,6 +146,7 @@ if __name__ == '__main__':
 
     # parser.add_argument('--logging_dir',       required=False, type=str,   default="log", help='Where to log' )
     parser.add_argument('--loglevel',   required=False, type=str,   default='INFO', help='logging level')
+    parser.add_argument('--no_wandb',  required=False, action='store_true', help='Disable Weights & Biases logging')
 
     args = parser.parse_args()
 
@@ -162,11 +162,11 @@ if __name__ == '__main__':
     log_path = os.path.join("models", args.model_name,
                             datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log'))
 
-    if not getattr(args, "no_wandb", False):
-        setup_wandb_no_prompt()
+    _wandb_mode = "disabled" if args.no_wandb else "online"
     run = wandb.init(
         project="NetVLAD-spotting",
-        name=args.model_name
+        name=args.model_name,
+        mode=_wandb_mode,
     )
 
     wandb.config.update(args)

@@ -11,7 +11,7 @@ from dataset import SoccerNetCaptions, SoccerNetCaptionsMaster, PredictionCaptio
 from model import Video2Caption, Video2CaptionWithTransformer
 from train import trainer, test_captioning, validate_captioning
 
-from utils import valid_probability, setup_wandb_no_prompt
+from utils import valid_probability
 
 import wandb
 
@@ -46,18 +46,21 @@ def main(args):
     resume_path = os.path.join("models", args.model_name, "caption", "model.pth.tar") if not args.test_only else None
     weights_for_init = None if (resume and resume_path and os.path.isfile(resume_path)) else args.load_weights
 
-    # create model (transformer + late fusion for caption, or original NetVLAD-based)
+    # create model (transformer + late fusion for caption, optionally fused with NetVLAD, or original NetVLAD-based)
     if getattr(args, 'use_transformer_caption', False):
         model = Video2CaptionWithTransformer(
             vocab_size=dataset_Test.vocab_size,
             weights=weights_for_init,
             input_size=args.feature_dim,
+            vlad_k=args.vlad_k,
             window_size=args.window_size_caption,
             framerate=args.framerate,
             d_model=getattr(args, 'caption_d_model', 256),
             nhead=getattr(args, 'caption_nhead', 8),
             num_encoder_layers=getattr(args, 'caption_num_encoder_layers', 2),
             encoder_pool=getattr(args, 'encoder_pool', 'first_last'),
+            netvlad_pool=args.pool,
+            use_netvlad_branch=True,
             audio_embed_dim=getattr(args, 'audio_embed_dim', 0),
             num_layers=args.num_layers,
             teacher_forcing_ratio=args.teacher_forcing_ratio,
@@ -136,7 +139,9 @@ def main(args):
         trainer("caption", train_loader, val_loader, val_metric_loader,
                 model, optimizer, scheduler, criterion,
                 model_name=args.model_name,
-                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency, device=args.device,
+                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency,
+                log_every_n_batches=getattr(args, 'log_every_n_batches', 50),
+                device=args.device,
                 start_epoch=start_epoch, initial_best_loss=initial_best_loss,
                 diversity_loss_weight=getattr(args, 'diversity_loss_weight', 0.0),
                 diversity_temperature=getattr(args, 'diversity_temperature', 1.0))
@@ -220,12 +225,15 @@ def dvc(args):
             vocab_size=dataset_Test.vocab_size,
             weights=args.load_weights,
             input_size=args.feature_dim,
+            vlad_k=args.vlad_k,
             window_size=args.window_size_caption,
             framerate=args.framerate,
             d_model=getattr(args, 'caption_d_model', 256),
             nhead=getattr(args, 'caption_nhead', 8),
             num_encoder_layers=getattr(args, 'caption_num_encoder_layers', 2),
             encoder_pool=getattr(args, 'encoder_pool', 'first_last'),
+            netvlad_pool=args.pool,
+            use_netvlad_branch=True,
             audio_embed_dim=getattr(args, 'audio_embed_dim', 0),
             num_layers=args.num_layers,
             teacher_forcing_ratio=args.teacher_forcing_ratio,
@@ -338,6 +346,7 @@ if __name__ == '__main__':
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
 
     parser.add_argument('--loglevel',   required=False, type=str,   default='INFO', help='logging level')
+    parser.add_argument('--no_wandb',  required=False, action='store_true', help='Disable Weights & Biases logging')
 
     args = parser.parse_args()
 
@@ -353,11 +362,11 @@ if __name__ == '__main__':
     log_path = os.path.join("models", args.model_name,
                             datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log'))
 
-    if not getattr(args, "no_wandb", False):
-        setup_wandb_no_prompt()
+    _wandb_mode = "disabled" if args.no_wandb else "online"
     run = wandb.init(
         project="NetVLAD-caption",
-        name=args.model_name
+        name=args.model_name,
+        mode=_wandb_mode,
     )
 
     wandb.config.update(args)
