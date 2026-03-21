@@ -49,9 +49,10 @@ if __name__ == '__main__':
     parser.add_argument('--caption_only', required=False, action='store_true', help='Run only caption training/eval; skip spotting and DVC.')
     parser.add_argument('--window_size_spotting', required=False, type=int,   default=15,     help='Size of the chunk (in seconds)' )
     parser.add_argument('--window_size_caption', required=False, type=int,   default=15,     help='Size of the chunk (in seconds)' )
-    parser.add_argument('--freeze_encoder',  required=False, action='store_true',  help='Perform testing only')
+    parser.add_argument('--freeze_encoder',  required=False, action='store_true',  help='Freeze caption video encoders (transformer + NetVLAD branch when using --use_transformer_caption)')
+    parser.add_argument('--freeze_netvlad_branch',  required=False, action='store_true',  help='With --use_transformer_caption: freeze only netvlad_encoder; train transformer, fusion, and decoder')
     parser.add_argument('--pretrain',   required=False, action='store_true',  help='Perform testing only' )
-    parser.add_argument('--weights_encoder',  required=False, type=str, default=None)
+    parser.add_argument('--weights_encoder',  required=False, type=str, default=None, help='Pretrained checkpoint (.pth.tar) whose encoder.* is loaded into netvlad_encoder when using --use_transformer_caption (e.g. baidu NetVLAD caption weights). Do not use --load_weights for that file—the decoder shapes differ.')
     parser.add_argument('--num_layers',  required=False, type=int, default=2)
 
     ### New section: Captioning: transformer aggregator + late fusion (for future audio)
@@ -60,7 +61,7 @@ if __name__ == '__main__':
     parser.add_argument('--caption_d_model',  required=False, type=int, default=256, help='Transformer d_model for caption encoder')
     parser.add_argument('--caption_nhead',  required=False, type=int, default=8, help='Transformer nhead for caption encoder')
     parser.add_argument('--caption_num_encoder_layers',  required=False, type=int, default=2, help='Number of transformer encoder layers for captioning')
-    parser.add_argument('--encoder_pool',  required=False, type=str, default='first_last', choices=['mean', 'last', 'first_last'], help='Transformer aggregator pool (mean|last|first_last)' )
+    parser.add_argument('--encoder_pool',  required=False, type=str, default='mean', choices=['mean', 'last', 'first_last'], help='Transformer aggregator pool (mean|last|first_last)' )
     parser.add_argument('--diversity_loss_weight',  required=False, type=float, default=0.0, help='Weight for encoder diversity loss (0=off)' )
     parser.add_argument('--diversity_temperature',  required=False, type=float, default=1.0, help='Temperature for diversity loss' )
 

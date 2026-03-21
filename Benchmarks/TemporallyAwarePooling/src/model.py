@@ -362,6 +362,8 @@ class Video2CaptionWithTransformer(nn.Module):
         num_layers=2,
         max_seq_length=50,
         freeze_encoder=False,
+        weights_encoder=None,
+        freeze_netvlad_only=False,
     ):
         super(Video2CaptionWithTransformer, self).__init__()
         self.use_netvlad_branch = use_netvlad_branch
@@ -404,8 +406,12 @@ class Video2CaptionWithTransformer(nn.Module):
             if self.use_netvlad_branch:
                 for param in self.netvlad_encoder.parameters():
                     param.requires_grad = False
+        elif freeze_netvlad_only and self.use_netvlad_branch:
+            for param in self.netvlad_encoder.parameters():
+                param.requires_grad = False
 
         self.load_weights(weights=weights)
+        self.load_netvlad_encoder(weights_encoder=weights_encoder)
 
     def load_weights(self, weights=None):
         if weights is not None:
@@ -413,6 +419,33 @@ class Video2CaptionWithTransformer(nn.Module):
             checkpoint = torch.load(weights, map_location="cpu")
             self.load_state_dict(checkpoint["state_dict"], strict=False)
             print("=> loaded checkpoint '{}' (epoch {})".format(weights, checkpoint["epoch"]))
+
+    def load_netvlad_encoder(self, weights_encoder=None):
+        """
+        Load weights from a Video2Caption / Video2Spot checkpoint into netvlad_encoder.
+        Checkpoint keys use prefix 'encoder.'; this model uses 'netvlad_encoder.' for the same VideoEncoder.
+        Use this for pretrained NetVLAD (e.g. baidu-NetVLAD caption weights) without loading the old decoder.
+        """
+        if weights_encoder is None or not self.use_netvlad_branch:
+            return
+        print("=> loading NetVLAD branch from '{}'".format(weights_encoder))
+        checkpoint = torch.load(weights_encoder, map_location=torch.device("cpu"))
+        state = checkpoint["state_dict"]
+        remapped = {}
+        for k, v in state.items():
+            key = k[len("module.") :] if k.startswith("module.") else k
+            if key.startswith("encoder."):
+                new_k = "netvlad_encoder." + key[len("encoder.") :]
+                remapped[new_k] = v
+        if not remapped:
+            print("=> warning: no 'encoder.*' keys found in checkpoint; NetVLAD branch unchanged")
+            return
+        self.load_state_dict(remapped, strict=False)
+        print(
+            "=> loaded NetVLAD branch from '{}' (epoch {}); remapped {} tensors".format(
+                weights_encoder, checkpoint.get("epoch", "?"), len(remapped)
+            )
+        )
 
     def _encode(self, video_features, audio_embeddings=None):
         video_enc = self.video_aggregator(video_features)  # (B, d_model)

@@ -65,6 +65,8 @@ def main(args):
             num_layers=args.num_layers,
             teacher_forcing_ratio=args.teacher_forcing_ratio,
             freeze_encoder=args.freeze_encoder,
+            weights_encoder=getattr(args, "weights_encoder", None),
+            freeze_netvlad_only=getattr(args, "freeze_netvlad_branch", False),
         ).to(args.device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=weights_for_init, input_size=args.feature_dim,
@@ -237,6 +239,8 @@ def dvc(args):
             audio_embed_dim=getattr(args, 'audio_embed_dim', 0),
             num_layers=args.num_layers,
             teacher_forcing_ratio=args.teacher_forcing_ratio,
+            weights_encoder=getattr(args, "weights_encoder", None),
+            freeze_netvlad_only=getattr(args, "freeze_netvlad_branch", False),
         ).to(args.device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
