@@ -165,7 +165,7 @@ def main(args):
         dataset_Test  = SoccerNetCaptions(
             path=args.SoccerNet_path,
             features=args.features,
-            split=args.split_test,
+            split=[split],
             version=args.version,
             framerate=args.framerate,
             window_size=args.window_size_caption,
