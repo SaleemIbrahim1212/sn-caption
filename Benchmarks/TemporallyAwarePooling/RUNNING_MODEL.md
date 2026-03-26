@@ -23,7 +23,7 @@ python -m spacy download en_core_web_sm
   - If not installed, caption validation metrics are skipped with a warning.
 - Shared contrastive checkpoint for transformer caption runs:
   - Request the `sbertcontrastive` model checkpoint from Saleem.
-  - Place it at a known path and pass that file with `--contrastive_weights_path`.
+  - Pass it with `--contrastive_weights_path`.
 
 ## Data Requirements
 
@@ -31,22 +31,24 @@ You need:
 
 - A valid SoccerNet root path (passed as `--SoccerNet_path`).
 - Feature name used for download/loading (for example `baidu_soccer_embeddings.npy`).
-- Mapping and memmap files used by the caption dataset:
-  - `mapping.json` (pass with `--mapping_json`)
-  - `features.dat` (pass with `--feature_file`)
+- Mapping and memmap files used by the caption dataset (for the **45 @ 1 fps** dense pipeline, paths will look like a folder containing `mapping.json` and `features.dat`):
+  - `--mapping_json` → path to `mapping.json`
+  - `--feature_file` → path to `features.dat`
 
-Defaults for mapping/memmap flags are:
+**Transformer + `sbertcontrastive`:** clip length in frames must match the checkpoint and memmap. Use **`--window_size_caption 45`** and **`--framerate 1`** so `window_size_caption × framerate = 45`.
+
+**CLI tip:** Do not put a space before the path after a flag (e.g. use `--SoccerNet_path C:/path` or `--SoccerNet_path=C:/path`). A space can make the value start with `=` and break paths.
+
+Defaults for mapping/memmap (if files sit in the current working directory):
 
 - `--mapping_json mapping.json`
 - `--feature_file features.dat`
-
-These paths are resolved from your current working directory when running commands.
 
 ## Recommended Working Directory
 
 Run commands from repository root.
 
-Windows (PowerShell) examples in this document are written from repo root.
+Windows (PowerShell) examples below use backtick line continuation and are written from repo root.
 
 ## Training (Baseline Caption Model)
 
@@ -77,42 +79,46 @@ Current support status for caption transformer:
 - `audio`: not implemented in training path
 - `both`: not implemented in training path
 
-This workflow assumes you preload the shared `sbertcontrastive` checkpoint from Saleem.
-Replace the checkpoint path below with your actual location.
+Use Saleem’s `sbertcontrastive` checkpoint and the **45 @ 1 fps** memmap bundle. Replace paths below with your local locations.
 
 ```powershell
 python Benchmarks/TemporallyAwarePooling/src/captioning.py `
   --SoccerNet_path "C:/path/to/SoccerNet" `
   --features baidu_soccer_embeddings.npy `
-  --mapping_json mapping.json `
-  --feature_file features.dat `
+  --mapping_json "C:/path/to/soccernet-densefile-at-45-1fps/mapping.json" `
+  --feature_file "C:/path/to/soccernet-densefile-at-45-1fps/features.dat" `
   --model_name transformer-video-caption `
   --caption_type Transformer `
   --transformer_modality video `
   --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" `
   --freeze_contrastive_encoder `
-  --pool NetVLAD++ `
+  --pool NetVLAD `
   --GPU 0 `
+  --window_size_caption 45 `
+  --framerate 1 `
   --device cuda
 ```
 
 ## Inference / Test-Only (Caption Side)
 
-Runs the caption pipeline in test-only mode with your saved model checkpoint.
+Runs the caption pipeline in test-only mode with your saved model checkpoint. Keep the same `--window_size_caption`, `--framerate`, and data paths as training.
 
 ```powershell
 python Benchmarks/TemporallyAwarePooling/src/captioning.py `
   --SoccerNet_path "C:/path/to/SoccerNet" `
   --features baidu_soccer_embeddings.npy `
-  --mapping_json mapping.json `
-  --feature_file features.dat `
+  --mapping_json "C:/path/to/soccernet-densefile-at-45-1fps/mapping.json" `
+  --feature_file "C:/path/to/soccernet-densefile-at-45-1fps/features.dat" `
   --model_name transformer-video-caption `
   --caption_type Transformer `
   --transformer_modality video `
   --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" `
   --freeze_contrastive_encoder `
-  --test_only `
+  --pool NetVLAD `
   --GPU 0 `
+  --window_size_caption 45 `
+  --framerate 1 `
+  --test_only `
   --device cuda
 ```
 
@@ -150,6 +156,10 @@ Dense caption prediction outputs:
 
 - `Invalid log level`:
   - Ensure `--loglevel` is one of Python logging levels (for example `INFO`).
+- `embedding_video` size mismatch (e.g. 45 vs 30):
+  - Use `--window_size_caption 45 --framerate 1` with `sbertcontrastive` and the 45–1 fps memmap.
+- Paths starting with `=`:
+  - Fix shell quoting so values are real paths, not `=/path/...`.
 - `No mapping entry found for game ...`:
   - Confirm `mapping.json` matches the selected split and feature memmap.
 - `Cannot infer memmap shape ...`:
@@ -165,4 +175,4 @@ Dense caption prediction outputs:
 
 - Keep caption-side runs on `src/captioning.py`.
 - Keep command lines in this file as the source of truth for team usage.
-- For transformer caption runs, use the shared `sbertcontrastive` checkpoint path in commands.
+- For transformer runs with Saleem’s `sbertcontrastive` weights, use `--window_size_caption 45 --framerate 1` and the matching memmap bundle.
