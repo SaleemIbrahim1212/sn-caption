@@ -21,6 +21,9 @@ python -m spacy download en_core_web_sm
 - Optional NLG caption metrics dependency (`nlgeval`) for full validation metrics:
   - Follow the note in `requirements.txt` (`scripts/install_nlg_eval.sh`).
   - If not installed, caption validation metrics are skipped with a warning.
+- Shared contrastive checkpoint for transformer caption runs:
+  - Request the `sbertcontrastive` model checkpoint from Saleem.
+  - Place it at a known path and pass that file with `--contrastive_weights_path`.
 
 ## Data Requirements
 
@@ -74,6 +77,9 @@ Current support status for caption transformer:
 - `audio`: not implemented in training path
 - `both`: not implemented in training path
 
+This workflow assumes you preload the shared `sbertcontrastive` checkpoint from Saleem.
+Replace the checkpoint path below with your actual location.
+
 ```powershell
 python Benchmarks/TemporallyAwarePooling/src/captioning.py `
   --SoccerNet_path "C:/path/to/SoccerNet" `
@@ -83,6 +89,8 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py `
   --model_name transformer-video-caption `
   --caption_type Transformer `
   --transformer_modality video `
+  --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" `
+  --freeze_contrastive_encoder `
   --pool NetVLAD++ `
   --GPU 0 `
   --device cuda
@@ -101,6 +109,8 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py `
   --model_name transformer-video-caption `
   --caption_type Transformer `
   --transformer_modality video `
+  --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" `
+  --freeze_contrastive_encoder `
   --test_only `
   --GPU 0 `
   --device cuda
@@ -117,6 +127,11 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py `
 - Logging:
   - `--loglevel INFO`
   - `--log_every_n_batches 50`
+- Contrastive preload:
+  - `--contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth"`
+  - `--freeze_contrastive_encoder` to keep pretrained encoder frozen
+  - `--no_freeze_contrastive_encoder` to fine-tune encoder
+  - `--unfreeze_contrastive_projection` to unfreeze projection when encoder is frozen
 
 ## Outputs
 
@@ -143,8 +158,11 @@ Dense caption prediction outputs:
   - Install the optional NLG evaluation dependencies for full caption metrics.
 - `NotImplementedError` with transformer modality:
   - Use `--transformer_modality video` for current training/inference support.
+- `Could not find the pretrained aggregator so skipping preload.`:
+  - Verify `--contrastive_weights_path` points to the shared `sbertcontrastive` checkpoint from Saleem.
 
 ## Team Workflow Notes
 
 - Keep caption-side runs on `src/captioning.py`.
 - Keep command lines in this file as the source of truth for team usage.
+- For transformer caption runs, use the shared `sbertcontrastive` checkpoint path in commands.
