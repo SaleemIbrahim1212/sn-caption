@@ -1,5 +1,6 @@
 .venv/
 venv/
+venv38/
 env/
 ENV/
 .npy
@@ -7,3 +8,4 @@ data/
 models/
 wandb/
 __pycache__/
+.DS_Store

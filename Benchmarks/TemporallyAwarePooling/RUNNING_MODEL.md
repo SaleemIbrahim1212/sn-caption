@@ -79,25 +79,45 @@ Current support status for caption transformer:
 - `audio`: not implemented in training path
 - `both`: not implemented in training path
 
-Use Saleem’s `sbertcontrastive` checkpoint and the **45 @ 1 fps** memmap bundle. Replace paths below with your local locations.
+Use Saleem’s `sbertcontrastive` checkpoint and the **45 @ 1 fps** memmap bundle.
+The parser defaults in `src/captioning.py` are now set to match the "full working model" training recipe, so you can run with fewer flags.
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py `
-  --SoccerNet_path "C:/path/to/SoccerNet" `
-  --features baidu_soccer_embeddings.npy `
-  --mapping_json "C:/path/to/soccernet-densefile-at-45-1fps/mapping.json" `
-  --feature_file "C:/path/to/soccernet-densefile-at-45-1fps/features.dat" `
-  --model_name transformer-video-caption `
-  --caption_type Transformer `
-  --transformer_modality video `
-  --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" `
-  --freeze_contrastive_encoder `
-  --pool NetVLAD `
-  --GPU 0 `
-  --window_size_caption 45 `
-  --framerate 1 `
-  --device cuda
-```
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --model_name NetVLAD-Transformer-memapfixed \
+  --transformer_modality video
+
+Current defaults for this transformer recipe (if not explicitly provided):
+
+- `--SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data`
+- `--features baidu_soccer_embeddings.npy`
+- `--mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json`
+- `--feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat`
+- `--model_name NetVLAD-Transformer-memapfixed`
+- `--caption_type Transformer`
+- `--transformer_modality video`
+- `--contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth`
+- `--freeze_contrastive_encoder` (enabled by default)
+- `--unfreeze_contrastive_projection` (enabled by default)
+- `--teacher_forcing_ratio 1.0`
+- `--window_size_caption 45`
+- `--word_dropout 0.01`
+- `--framerate 1`
+- `--max_epochs 100`
+- `--evaluation_frequency 1`
+- `--log_every_n_batches 20`
+- `--max_num_worker 2`
+- `--num_layers 2`
+- `--split_train train`
+- `--split_valid valid`
+- `--split_test test`
+- `--GPU 0`
+- `--device cuda`
+- `--loglevel INFO`
 
 ## Inference / Test-Only (Caption Side)
 
@@ -127,7 +147,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py `
 - Splits:
   - `--split_train train`
   - `--split_valid valid`
-  - `--split_test test challenge`
+  - `--split_test test`
 - Reproducibility:
   - `--seed 0`
 - Logging:
