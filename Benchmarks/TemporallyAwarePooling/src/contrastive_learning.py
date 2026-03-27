@@ -29,11 +29,27 @@ def trainer(train_loader,
             criterion,
             max_epochs=20,
             log_every_n_batches=50):
-    
-    '''Borrowed code from captioning.py so we can do contrastive learning on the encoder
-        > The attempt here is to get the embeddings aligned with the captions so we get good representations from the transformer
-        > Running this script tries to align the process, the loss function is copied from the CLIP paper which tackles the same iissue '''
+    """Run the contrastive pretraining loop to align video and text embeddings.
+    Trains a video encoder and a text encoder jointly using a CLIP-style contrastive
+    loss so that matching video–caption pairs are pulled together in embedding space
+    while non-matching pairs are pushed apart.
 
+    Args:
+        train_loader (DataLoader): Training dataloader yielding batches of
+            ``(feats, caption), lengths, mask, caption_or, cap_id``.
+        model_video (nn.Module): Video encoder (e.g. ``Transformer_Video``) that
+            maps video features to a shared embedding space.
+        model_text (nn.Module): Text encoder (e.g. ``TextEncoder``) that maps
+            captions to the same shared embedding space.
+        optimizer (torch.optim.Optimizer): Optimizer over both models' parameters.
+        scheduler (torch.optim.lr_scheduler._LRScheduler or None): Optional
+            learning-rate scheduler stepped on training loss each epoch.
+        model_name (str): Name used to create the output directory under ``models/``.
+        criterion (nn.Module): Contrastive loss function (e.g. ``ContrastiveLoss``).
+        max_epochs (int): Number of training epochs. Default: 20.
+        log_every_n_batches (int): Frequency (in batches) for logging metrics to
+            the console and Weights & Biases. Default: 50.
+    """
     logging.info("start contrastive training")
     os.makedirs(os.path.join("models", model_name), exist_ok=True)
     for epoch in range(max_epochs):
@@ -48,6 +64,25 @@ def trainer(train_loader,
     return
 
 def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoch, log_every_n_batches=50):
+    """Execute a single training epoch for contrastive video–text alignment.
+    Iterates over all batches, computing the contrastive loss between video and text
+    embeddings, back-propagating, and logging diagnostics (diagonal vs. off-diagonal
+    cosine similarity, top-1 retrieval accuracy). Saves a checkpoint at the end of
+    each epoch.
+
+    Args:
+        phase (str): Label for logging (e.g. ``'contrastive'``).
+        dataloader (DataLoader): Training dataloader.
+        model_video (nn.Module): Video encoder.
+        model_text (nn.Module): Text encoder.
+        criterion (nn.Module): Contrastive loss function.
+        optimizer (torch.optim.Optimizer): Optimizer for both models.
+        epoch (int): Current epoch number (1-indexed).
+        log_every_n_batches (int): Logging frequency in batches. Default: 50.
+
+    Returns:
+        float: Average training loss over the epoch.
+    """
     device = next(model_video.parameters()).device
     device2 = next(model_text.parameters()).device 
 
@@ -136,6 +171,26 @@ def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoc
 
 
 class TextEncoder(nn.Module):
+    """Lightweight text encoder that projects sentence embeddings into a shared space.
+    Uses a frozen ``all-MiniLM-L6-v2`` sentence-transformer to produce 384-dimensional
+    sentence embeddings, then maps them to ``proj_dim`` via a single trainable linear
+    layer. This allows efficient text encoding while only learning the projection head.
+
+    Args:
+        vocab_size (int): Vocabulary size (unused; kept for interface compatibility).
+        embed_dim (int): Embedding dimension (unused; kept for interface compatibility).
+        proj_dim (int): Output projection dimension, should match the video encoder's
+            output dimension for contrastive alignment.
+        isFrozen (bool): If True, freeze all sentence-transformer parameters so only
+            the linear projection is trained. Default: True.
+
+    Forward args:
+        caption (list[str]): Raw caption strings to encode.
+        lengths (Tensor): Caption lengths (unused; kept for interface compatibility).
+
+    Returns:
+        Tensor: Projected text embeddings of shape ``(batch, proj_dim)``.
+    """
     def __init__(self, vocab_size, embed_dim, proj_dim, isFrozen=True):
         super().__init__()
         self.model = SentenceTransformer("all-MiniLM-L6-v2")
