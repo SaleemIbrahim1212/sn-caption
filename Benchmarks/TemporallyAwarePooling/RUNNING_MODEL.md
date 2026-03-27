@@ -88,8 +88,10 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py \
   --features baidu_soccer_embeddings.npy \
   --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
   --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
   --model_name NetVLAD-Transformer-memapfixed \
   --transformer_modality video
+```
 
 Current defaults for this transformer recipe (if not explicitly provided):
 
