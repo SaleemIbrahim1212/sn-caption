@@ -332,6 +332,47 @@ class Video2Caption(nn.Module):
         return self.decoder.sample(features, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
+    """A transformer-based encoder-decoder model for generating captions of soccer events.
+    Combines a multimodal transformer encoder (supporting video, audio, or both) with
+    an LSTM decoder that uses attention over encoder outputs to produce natural language
+    descriptions of soccer actions.
+    Args:
+        vocab_size (int): Size of the output vocabulary.
+        weights (str, optional): Path to full model weights (currently unused).
+        input_size (int): Dimensionality of input features. Default: 512.
+        window_size (int): Number of frames in the temporal window. Default: 15.
+        framerate (int): Video framerate used for feature extraction. Default: 2.
+        pool (str): Encoder pooling strategy. One of 'Transformer_Video',
+            'Transformer_Audio', or a multimodal variant. Default: 'Transformer_Video'.
+        embed_size (int): Word embedding dimension for the decoder. Default: 256.
+        hidden_size (int): Hidden state size of the decoder LSTM. Default: 512.
+        teacher_forcing_ratio (float): Initial probability of using teacher forcing
+            during training. Default: 1.0.
+        teacher_forcing_decay (float): Amount to reduce the teacher forcing ratio
+            per forward pass. Default: 0.0.
+        teacher_forcing_min (float): Minimum teacher forcing ratio after decay. Default: 0.5.
+        num_layers (int): Number of stacked LSTM layers in the decoder. Default: 2.
+        max_seq_length (int): Maximum caption length during generation. Default: 50.
+        weights_encoder (str, optional): Path to pretrained encoder checkpoint.
+        freeze_encoder (bool): If True, freeze all encoder parameters. Default: False.
+        contrastive_weights_path (str, optional): Path to contrastive pretraining weights
+            for the encoder.
+        freeze_contrastive_encoder (bool): If True, freeze the contrastive encoder
+            backbone. Default: True.
+        unfreeze_contrastive_projection (bool): If True, keep the contrastive projection
+            head trainable even when the encoder is frozen. Default: False.
+        word_dropout (float): Dropout rate applied to word embeddings. Default: 0.4.
+
+    Forward pass:
+        Encodes input features via the selected modality, then decodes captions using
+        either teacher forcing (ground-truth tokens as decoder input) or autoregressive
+        greedy decoding with scaled dot-product attention over encoder outputs. Returns
+        packed padded decoder logits.
+
+    Inference:
+        Use ``sample()`` to autoregressively generate a caption given raw video/audio
+        features.
+    """
     def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.0, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(
