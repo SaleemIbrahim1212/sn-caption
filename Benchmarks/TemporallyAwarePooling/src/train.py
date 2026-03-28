@@ -27,6 +27,18 @@ if caption_scorer is not None and hasattr(caption_scorer, "scorers"):
     caption_scorer.scorers = [s for s in caption_scorer.scorers if s[1] != "SPICE"]
 
 
+def _unpack_caption_batch_feats(feats_batch, pool, device):
+    """Map collated features to (video_tensor | None, audio_tensor | None)."""
+    if pool == "Transformer_Audio":
+        return None, feats_batch.to(device)
+    multipart = isinstance(feats_batch, (list, tuple)) and len(feats_batch) == 2
+    if multipart:
+        a, b = feats_batch[0], feats_batch[1]
+        if torch.is_tensor(a) and torch.is_tensor(b):
+            return a.to(device), b.to(device)
+    return feats_batch.to(device), None
+
+
 def _compute_grad_l2_norm(parameters):
     total_sq_norm = 0.0
     for p in parameters:
@@ -198,13 +210,7 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
                 target = pack_padded_sequence(target, lengths, batch_first=True, enforce_sorted=False)[0]
                 mask = pack_padded_sequence(mask[:, 1:], lengths, batch_first=True, enforce_sorted=False)[0]
                 pool = getattr(getattr(model, "encoder", None), "pool", "")
-                if isinstance(feats_batch, tuple) and len(feats_batch) == 2:
-                    feats_v = feats_batch[0].to(device)
-                    feats_a = feats_batch[1].to(device)
-                elif pool == "Transformer_Audio":
-                    feats_v, feats_a = None, feats_batch.to(device)
-                else:
-                    feats_v, feats_a = feats_batch.to(device), None
+                feats_v, feats_a = _unpack_caption_batch_feats(feats_batch, pool, device)
                 # compute output
                 if hasattr(model, "encoder") and pool.startswith("Transformer_Video"):
                     output = model(feats_v, None, caption, model_lengths)
@@ -491,13 +497,7 @@ def validate_captioning(dataloader, model, model_name):
             # measure data loading time
             data_time.update(time.time() - end)
             pool = getattr(getattr(model, "encoder", None), "pool", "")
-            if isinstance(feats_batch, tuple) and len(feats_batch) == 2:
-                feats_v = feats_batch[0].to(device)
-                feats_a = feats_batch[1].to(device)
-            elif pool == "Transformer_Audio":
-                feats_v, feats_a = None, feats_batch.to(device)
-            else:
-                feats_v, feats_a = feats_batch.to(device), None
+            feats_v, feats_a = _unpack_caption_batch_feats(feats_batch, pool, device)
             #compute output string
             if hasattr(model, "encoder") and pool.startswith("Transformer_Video"):
                 output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx], None).detach().cpu())) for idx in range(feats_v.shape[0])]

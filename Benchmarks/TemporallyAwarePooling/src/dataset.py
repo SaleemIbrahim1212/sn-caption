@@ -19,7 +19,6 @@ from torchtext.vocab import vocab
 from SoccerNet.Downloader import getListGames
 from SoccerNet.Downloader import SoccerNetDownloader
 from SoccerNet.Evaluation.utils import getMetaDataTask
-from torch.utils.data import default_collate
 import numpy as np
 
 PAD_TOKEN = 0
@@ -75,6 +74,17 @@ def _resolve_mapping_entry(mapping, game_name, game_id, game_to_mapping_key):
         "Check mapping_json consistency with the selected split."
     )
 
+def _stack_feature_clips(rows):
+    """Stack numpy (or memmap) clips to B×T×D float tensor; copy so tensors are writable."""
+    tensors = []
+    for r in rows:
+        x = np.asarray(r, dtype=np.float32, order="C")
+        if isinstance(r, np.memmap) or not x.flags.writeable:
+            x = np.array(x, copy=True)
+        tensors.append(torch.as_tensor(x))
+    return torch.stack(tensors, dim=0)
+
+
 def collate_fn_padd(batch):
     '''
     Padds batch of variable length
@@ -94,12 +104,13 @@ def collate_fn_padd(batch):
     mask = (tokens != PAD_TOKEN)
     prefix = [t[:-4] for t in batch]
     if len(prefix[0]) == 2:
+        # Always a tuple of two tensors (default_collate may return a list for some elem types).
         feats_batch = (
-            default_collate([p[0] for p in prefix]),
-            default_collate([p[1] for p in prefix]),
+            _stack_feature_clips([p[0] for p in prefix]),
+            _stack_feature_clips([p[1] for p in prefix]),
         )
     elif len(prefix[0]) == 1:
-        feats_batch = default_collate([p[0] for p in prefix])
+        feats_batch = _stack_feature_clips([p[0] for p in prefix])
     else:
         raise ValueError(f"Expected 1 or 2 feature tensors before caption tokens, got {len(prefix[0])}")
     return (feats_batch, tokens), lengths, mask, captions, idx

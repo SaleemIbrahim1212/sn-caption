@@ -49,7 +49,7 @@ Defaults for mapping/memmap (if files sit in the current working directory):
 
 Run commands from repository root.
 
-Windows (PowerShell) examples below use backtick line continuation and are written from repo root.
+Command examples below use backslash line continuation (bash/zsh) and are written from repo root.
 
 ## Training (Baseline Caption Model)
 
@@ -60,21 +60,21 @@ This uses default training values unless you override them:
 - `evaluation_frequency=10`
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py `
-  --SoccerNet_path "C:/path/to/SoccerNet" `
-  --features baidu_soccer_embeddings.npy `
-  --mapping_json mapping.json `
-  --feature_file features.dat `
-  --model_name baseline-caption `
-  --caption_type Baseline `
-  --pool NetVLAD++ `
-  --GPU 0 `
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path "C:/path/to/SoccerNet" \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json mapping.json \
+  --feature_file features.dat \
+  --model_name baseline-caption \
+  --caption_type Baseline \
+  --pool NetVLAD++ \
+  --GPU 0 \
   --device cuda
 ```
 
 ## Training (Transformer Video Caption Model)
 
-Current support status for caption transformer:
+Transformer caption modalities:
 
 - `video`: video memmap only; optional **`--contrastive_weights_path`** preloads `Transformer_Video` from Saleem’s `sbertcontrastive` checkpoint.
 - `audio`: audio memmap only (**`--master_audio_dir`** required). Contrastive checkpoint does **not** apply to the audio encoder.
@@ -84,13 +84,13 @@ Use Saleem’s `sbertcontrastive` checkpoint and the **45 @ 1 fps** memmap bundl
 The parser defaults in `src/captioning.py` are set to match the "full working model" training recipe, so you can run with fewer flags.
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py `
-  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data `
-  --features baidu_soccer_embeddings.npy `
-  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json `
-  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat `
-  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth `
-  --model_name NetVLAD-Transformer-memapfixed `
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
+  --model_name NetVLAD-Transformer-memapfixed \
   --transformer_modality video
 ```
 
@@ -99,15 +99,15 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py `
 Same windowing as video (**`--window_size_caption 45`** and **`--framerate 1`**) so clips stay aligned. Set **`--master_audio_dir`** to the folder that contains `audio_mapping.json` and `audio_features.dat`.
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py `
-  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data `
-  --features baidu_soccer_embeddings.npy `
-  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json `
-  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat `
-  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio `
-  --model_name transformer-audio-caption `
-  --transformer_modality audio `
-  --GPU 0 `
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio \
+  --model_name transformer-audio-caption \
+  --transformer_modality audio \
+  --GPU 0 \
   --device cuda
 ```
 
@@ -116,16 +116,16 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py `
 Both memmaps loaded; fusion uses separate audio and video transformer encoders, then concatenates pooled representations for the caption decoder.
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py `
-  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data `
-  --features baidu_soccer_embeddings.npy `
-  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json `
-  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat `
-  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio `
-  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth `
-  --model_name transformer-av-caption `
-  --transformer_modality both `
-  --GPU 0 `
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio \
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
+  --model_name transformer-av-caption \
+  --transformer_modality both \
+  --GPU 0 \
   --device cuda
 ```
 
@@ -162,21 +162,21 @@ Current defaults for this transformer recipe (if not explicitly provided):
 Runs the caption pipeline in test-only mode with your saved model checkpoint. Keep the same `--window_size_caption`, `--framerate`, and data paths as training. For checkpoints trained with **`audio`** or **`both`**, add **`--transformer_modality`** and **`--master_audio_dir`** to match training.
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py `
-  --SoccerNet_path "C:/path/to/SoccerNet" `
-  --features baidu_soccer_embeddings.npy `
-  --mapping_json "C:/path/to/soccernet-densefile-at-45-1fps/mapping.json" `
-  --feature_file "C:/path/to/soccernet-densefile-at-45-1fps/features.dat" `
-  --model_name transformer-video-caption `
-  --caption_type Transformer `
-  --transformer_modality video `
-  --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" `
-  --freeze_contrastive_encoder `
-  --pool NetVLAD `
-  --GPU 0 `
-  --window_size_caption 45 `
-  --framerate 1 `
-  --test_only `
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path "C:/path/to/SoccerNet" \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json "C:/path/to/soccernet-densefile-at-45-1fps/mapping.json" \
+  --feature_file "C:/path/to/soccernet-densefile-at-45-1fps/features.dat" \
+  --model_name transformer-video-caption \
+  --caption_type Transformer \
+  --transformer_modality video \
+  --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" \
+  --freeze_contrastive_encoder \
+  --pool NetVLAD \
+  --GPU 0 \
+  --window_size_caption 45 \
+  --framerate 1 \
+  --test_only \
   --device cuda
 ```
 
