@@ -34,6 +34,7 @@ You need:
 - Mapping and memmap files used by the caption dataset (for the **45 @ 1 fps** dense pipeline, paths will look like a folder containing `mapping.json` and `features.dat`):
   - `--mapping_json` → path to `mapping.json`
   - `--feature_file` → path to `features.dat`
+- **Audio transformer (`--transformer_modality audio` or `both`):** a directory (single extra flag) passed as **`--master_audio_dir`**, containing **`audio_mapping.json`** and **`audio_features.dat`**. Build them with repo-root `build_audio_embedding_memmap.py` (or your existing pipeline). Video `mapping.json` / `features.dat` are still required so the dataset can align games and labels; audio-only training still opens the video memmap.
 
 **Transformer + `sbertcontrastive`:** clip length in frames must match the checkpoint and memmap. Use **`--window_size_caption 45`** and **`--framerate 1`** so `window_size_caption × framerate = 45`.
 
@@ -75,22 +76,57 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py `
 
 Current support status for caption transformer:
 
-- `video`: implemented
-- `audio`: not implemented in training path
-- `both`: not implemented in training path
+- `video`: video memmap only; optional **`--contrastive_weights_path`** preloads `Transformer_Video` from Saleem’s `sbertcontrastive` checkpoint.
+- `audio`: audio memmap only (**`--master_audio_dir`** required). Contrastive checkpoint does **not** apply to the audio encoder.
+- `both`: video + audio memmaps; **`--master_audio_dir`** required; you may still pass **`--contrastive_weights_path`** for the **video** branch only.
 
-Use Saleem’s `sbertcontrastive` checkpoint and the **45 @ 1 fps** memmap bundle.
-The parser defaults in `src/captioning.py` are now set to match the "full working model" training recipe, so you can run with fewer flags.
+Use Saleem’s `sbertcontrastive` checkpoint and the **45 @ 1 fps** memmap bundle for **video** runs.
+The parser defaults in `src/captioning.py` are set to match the "full working model" training recipe, so you can run with fewer flags.
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py \
-  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
-  --features baidu_soccer_embeddings.npy \
-  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
-  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
-  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
-  --model_name NetVLAD-Transformer-memapfixed \
+python Benchmarks/TemporallyAwarePooling/src/captioning.py `
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data `
+  --features baidu_soccer_embeddings.npy `
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json `
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat `
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth `
+  --model_name NetVLAD-Transformer-memapfixed `
   --transformer_modality video
+```
+
+## Training (Transformer Audio Caption Model)
+
+Same windowing as video (**`--window_size_caption 45`** and **`--framerate 1`**) so clips stay aligned. Set **`--master_audio_dir`** to the folder that contains `audio_mapping.json` and `audio_features.dat`.
+
+```powershell
+python Benchmarks/TemporallyAwarePooling/src/captioning.py `
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data `
+  --features baidu_soccer_embeddings.npy `
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json `
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat `
+  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio `
+  --model_name transformer-audio-caption `
+  --transformer_modality audio `
+  --GPU 0 `
+  --device cuda
+```
+
+## Training (Transformer Video + Audio)
+
+Both memmaps loaded; fusion uses separate audio and video transformer encoders, then concatenates pooled representations for the caption decoder.
+
+```powershell
+python Benchmarks/TemporallyAwarePooling/src/captioning.py `
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data `
+  --features baidu_soccer_embeddings.npy `
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json `
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat `
+  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio `
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth `
+  --model_name transformer-av-caption `
+  --transformer_modality both `
+  --GPU 0 `
+  --device cuda
 ```
 
 Current defaults for this transformer recipe (if not explicitly provided):
@@ -123,7 +159,7 @@ Current defaults for this transformer recipe (if not explicitly provided):
 
 ## Inference / Test-Only (Caption Side)
 
-Runs the caption pipeline in test-only mode with your saved model checkpoint. Keep the same `--window_size_caption`, `--framerate`, and data paths as training.
+Runs the caption pipeline in test-only mode with your saved model checkpoint. Keep the same `--window_size_caption`, `--framerate`, and data paths as training. For checkpoints trained with **`audio`** or **`both`**, add **`--transformer_modality`** and **`--master_audio_dir`** to match training.
 
 ```powershell
 python Benchmarks/TemporallyAwarePooling/src/captioning.py `
@@ -155,11 +191,13 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py `
 - Logging:
   - `--loglevel INFO`
   - `--log_every_n_batches 50`
-- Contrastive preload:
+- Contrastive preload (video transformer branch only):
   - `--contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth"`
   - `--freeze_contrastive_encoder` to keep pretrained encoder frozen
   - `--no_freeze_contrastive_encoder` to fine-tune encoder
   - `--unfreeze_contrastive_projection` to unfreeze projection when encoder is frozen
+- Audio / multimodal memmap (required when `--transformer_modality` is `audio` or `both`):
+  - `--master_audio_dir "C:/path/to/master_audio"` (directory must contain `audio_mapping.json` and `audio_features.dat`)
 
 ## Outputs
 
@@ -188,8 +226,8 @@ Dense caption prediction outputs:
   - Confirm `features.dat` is the expected file for the selected mapping/features.
 - `Skipping caption validation: ...`:
   - Install the optional NLG evaluation dependencies for full caption metrics.
-- `NotImplementedError` with transformer modality:
-  - Use `--transformer_modality video` for current training/inference support.
+- `Set --master_audio_dir ...` when using audio or both:
+  - Pass `--master_audio_dir` to the directory with `audio_mapping.json` and `audio_features.dat`, or use `--transformer_modality video` for video-only.
 - `Could not find the pretrained aggregator so skipping preload.`:
   - Verify `--contrastive_weights_path` points to the shared `sbertcontrastive` checkpoint from Saleem.
 
