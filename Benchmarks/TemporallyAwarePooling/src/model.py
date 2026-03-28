@@ -402,6 +402,10 @@ class SoccerNetTransformerCaption(nn.Module):
             audio_feat_dim=audio_input_size,
         )
         self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers, word_dropout=word_dropout)
+        # DecoderRNN attention uses a fixed 512-d context (see DecoderRNN.forward); fusion concat is 1024-d.
+        self.fusion_ctx_proj = (
+            nn.Linear(self.encoder.hidden_size, 512) if pool == "Transformer" else None
+        )
         #self.load_weights(weights=weights)
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
         self.vocab_size = vocab_size
@@ -431,7 +435,7 @@ class SoccerNetTransformerCaption(nn.Module):
         else:
             '''get the cls token for the combined versions'''
             features = self.encoder(audio_feats=features_audio, video_feats=features_video)
-            encoder_out = features.unsqueeze(1)
+            encoder_out = self.fusion_ctx_proj(features.unsqueeze(1))
         batch_size = captions.size(0)
         captions = captions[:, :-1]  # Remove last word in caption to use as input
         decoder_lengths = [max(int(length) - 1, 1) for length in lengths]
@@ -472,7 +476,7 @@ class SoccerNetTransformerCaption(nn.Module):
             features, encoder_output = self.encoder(audio_feats=features_audio.unsqueeze(0))
         else:
             features = self.encoder(audio_feats=features_audio.unsqueeze(0), video_feats=features_video.unsqueeze(0))
-            encoder_output = features.unsqueeze(1)
+            encoder_output = self.fusion_ctx_proj(features.unsqueeze(1))
 
         return self.decoder.sample(features, encoder_output, max_seq_length)
  
