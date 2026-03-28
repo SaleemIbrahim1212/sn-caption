@@ -40,6 +40,56 @@ def resolve_caption_pool(args):
     return modality_to_pool[modality]
 
 
+def caption_dataset_kw(args):
+    cap_mod = (
+        str(args.transformer_modality).strip().lower()
+        if str(args.caption_type).strip().lower() == "transformer"
+        else "video"
+    )
+    mad = getattr(args, "master_audio_dir", None)
+    if isinstance(mad, str) and mad.strip() == "":
+        mad = None
+    if cap_mod in ("audio", "both") and not mad:
+        raise ValueError(
+            "Set --master_audio_dir to the folder with audio_mapping.json and audio_features.dat "
+            "when using --transformer_modality audio or both."
+        )
+    return dict(
+        path=args.SoccerNet_path,
+        features=args.features,
+        version=args.version,
+        framerate=args.framerate,
+        window_size=args.window_size_caption,
+        mapping_json=args.mapping_json,
+        feature_file=args.feature_file,
+        caption_modality=cap_mod,
+        master_audio_dir=mad if cap_mod in ("audio", "both") else None,
+    )
+
+
+def resolve_caption_feature_dims(args, dataset_Test):
+    s0 = dataset_Test[0]
+    if str(args.caption_type).strip().lower() == "transformer":
+        mod = str(args.transformer_modality).strip().lower()
+        if mod == "both":
+            if args.feature_dim is None:
+                args.feature_dim = s0[0].shape[-1]
+            args.audio_feature_dim = s0[1].shape[-1]
+        elif mod == "audio":
+            if args.feature_dim is None:
+                args.feature_dim = s0[0].shape[-1]
+            args.audio_feature_dim = args.feature_dim
+        else:
+            if args.feature_dim is None:
+                args.feature_dim = s0[0].shape[-1]
+            args.audio_feature_dim = None
+    else:
+        if args.feature_dim is None:
+            args.feature_dim = s0[0].shape[-1]
+        args.audio_feature_dim = None
+    print("feature_dim:", args.feature_dim, "audio_feature_dim:", getattr(args, "audio_feature_dim", None))
+
+
 def main(args):
     device = resolve_device(args)
     caption_pool = resolve_caption_pool(args)
@@ -48,16 +98,15 @@ def main(args):
     for arg in vars(args):
         logging.info(arg.rjust(15) + " : " + str(getattr(args, arg)))
 
+    d_kw = caption_dataset_kw(args)
     # create dataset
     if not args.test_only:
-        dataset_Train = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
-        dataset_Valid = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
-        dataset_Valid_metric  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
-    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
+        dataset_Train = SoccerNetCaptions(split=args.split_train, **d_kw)
+        dataset_Valid = SoccerNetCaptions(split=args.split_valid, **d_kw)
+        dataset_Valid_metric  = SoccerNetCaptions(split=args.split_valid, **d_kw)
+    dataset_Test  = SoccerNetCaptions(split=args.split_test, **d_kw)
 
-    if args.feature_dim is None:
-        args.feature_dim = dataset_Test[0][0].shape[-1]
-        print("feature_dim found:", args.feature_dim)
+    resolve_caption_feature_dims(args, dataset_Test)
     # create model
 
     if str(args.caption_type).strip().lower() == "transformer":
@@ -72,7 +121,8 @@ def main(args):
                   weights_encoder=args.weights_encoder,
                   contrastive_weights_path=args.contrastive_weights_path,
                   freeze_contrastive_encoder=args.freeze_contrastive_encoder,
-                  unfreeze_contrastive_projection=args.unfreeze_contrastive_projection).to(device)
+                  unfreeze_contrastive_projection=args.unfreeze_contrastive_projection,
+                  audio_input_size=getattr(args, "audio_feature_dim", None)).to(device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -162,16 +212,7 @@ def main(args):
     # validate caption generation on groundtruth spots on multiple splits [test/challenge]
     for split in args.split_test:
 
-        dataset_Test  = SoccerNetCaptions(
-            path=args.SoccerNet_path,
-            features=args.features,
-            split=[split],
-            version=args.version,
-            framerate=args.framerate,
-            window_size=args.window_size_caption,
-            mapping_json=args.mapping_json,
-            feature_file=args.feature_file,
-            )
+        dataset_Test  = SoccerNetCaptions(split=[split], **d_kw)
 
         test_loader = torch.utils.data.DataLoader(dataset_Test,
             batch_size=args.batch_size, shuffle=False,
@@ -207,11 +248,10 @@ def dvc(args):
     for arg in vars(args):
         logging.info(arg.rjust(15) + " : " + str(getattr(args, arg)))
 
-    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
+    d_kw = caption_dataset_kw(args)
+    dataset_Test  = SoccerNetCaptions(split=args.split_test, **d_kw)
 
-    if args.feature_dim is None:
-        args.feature_dim = dataset_Test[0][0].shape[-1]
-        print("feature_dim found:", args.feature_dim)
+    resolve_caption_feature_dims(args, dataset_Test)
     # create model
 
     if str(args.caption_type).strip().lower() == "transformer":
@@ -226,7 +266,8 @@ def dvc(args):
                   weights_encoder=args.weights_encoder,
                   contrastive_weights_path=args.contrastive_weights_path,
                   freeze_contrastive_encoder=args.freeze_contrastive_encoder,
-                  unfreeze_contrastive_projection=args.unfreeze_contrastive_projection).to(device)
+                  unfreeze_contrastive_projection=args.unfreeze_contrastive_projection,
+                  audio_input_size=getattr(args, "audio_feature_dim", None)).to(device)
     else: 
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -249,7 +290,19 @@ def dvc(args):
     # generate dense caption on multiple splits [test/challenge]
     for split in args.split_test:
         PredictionPath = os.path.join("models", args.model_name, f"outputs/{split}")
-        dataset_Test  = PredictionCaptions(SoccerNetPath=args.SoccerNet_path, PredictionPath=PredictionPath, features=args.features, split=[split], version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
+        dataset_Test  = PredictionCaptions(
+            SoccerNetPath=args.SoccerNet_path,
+            PredictionPath=PredictionPath,
+            features=d_kw["features"],
+            split=[split],
+            version=d_kw["version"],
+            framerate=d_kw["framerate"],
+            window_size=d_kw["window_size_caption"],
+            mapping_json=d_kw["mapping_json"],
+            feature_file=d_kw["feature_file"],
+            caption_modality=d_kw["caption_modality"],
+            master_audio_dir=d_kw["master_audio_dir"],
+        )
 
         test_loader = torch.utils.data.DataLoader(dataset_Test,
             batch_size=args.batch_size, shuffle=False,
@@ -292,6 +345,7 @@ if __name__ == '__main__':
     parser.add_argument('--features',   required=False, type=str,   default="baidu_soccer_embeddings.npy",     help='Video features' )
     parser.add_argument('--mapping_json', required=False, type=str, default="/kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json", help='Path to memmap row mapping json')
     parser.add_argument('--feature_file', required=False, type=str, default="/kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat", help='Path to memmap feature file')
+    parser.add_argument('--master_audio_dir', required=False, type=str, default=None, help='Directory with audio_mapping.json and audio_features.dat (e.g. ../../data/master_audio)')
     parser.add_argument('--max_epochs',   required=False, type=int,   default=100,     help='Maximum number of epochs' )
     parser.add_argument('--load_weights',   required=False, type=str,   default=None,     help='weights to load' )
     parser.add_argument('--model_name',   required=False, type=str,   default="NetVLAD-Transformer-memapfixed",     help='named of the model to save' )

@@ -92,7 +92,17 @@ def collate_fn_padd(batch):
     tokens = torch.nn.utils.rnn.pad_sequence(tokens, batch_first=True)
     ## compute mask
     mask = (tokens != PAD_TOKEN)
-    return default_collate([t[:-4] for t in batch ]) + [tokens], lengths, mask, captions, idx
+    prefix = [t[:-4] for t in batch]
+    if len(prefix[0]) == 2:
+        feats_batch = (
+            default_collate([p[0] for p in prefix]),
+            default_collate([p[1] for p in prefix]),
+        )
+    elif len(prefix[0]) == 1:
+        feats_batch = default_collate([p[0] for p in prefix])
+    else:
+        raise ValueError(f"Expected 1 or 2 feature tensors before caption tokens, got {len(prefix[0])}")
+    return (feats_batch, tokens), lengths, mask, captions, idx
 
 
 def feats2clip(feats, stride, clip_length, padding = "replicate_last", off=0):
@@ -317,7 +327,7 @@ class SoccerNetCaptions(Dataset):
     """
     This class is used to download and pre-compute clips and captions from the SoccerNet dataset for captining training phase.
     """
-    def __init__(self, path, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15, mapping_json = "mapping.json", feature_file = "features.dat" ):
+    def __init__(self, path, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15, mapping_json = "mapping.json", feature_file = "features.dat", master_audio_dir=None, caption_modality="video"):
         self.path = path
         split = [s for s in split if s!= "challenge"]
         self.listGames = getListGames(split, task="caption")
@@ -325,6 +335,9 @@ class SoccerNetCaptions(Dataset):
         self.window_size_frame = window_size*framerate
         self.version = version
         self.labels, self.num_classes, self.dict_event, _ = getMetaDataTask("caption", "SoccerNet", version)
+        self.caption_modality = str(caption_modality).strip().lower()
+        if self.caption_modality in ("audio", "both") and not master_audio_dir:
+            raise ValueError("master_audio_dir is required when caption_modality is 'audio' or 'both'")
 
         logging.info("Checking/Download features and labels locally")
         downloader = SoccerNetDownloader(path)
@@ -338,6 +351,18 @@ class SoccerNetCaptions(Dataset):
         self.game_to_mapping_key = _build_game_to_mapping_key(self.mapping)
         memmap_rows, memmap_dim = _infer_memmap_shape(feature_file, self.mapping)
         self.memmap = np.memmap(feature_file, mode='r', shape=(memmap_rows, memmap_dim), dtype='float32')
+
+        self.audio_mapping = None
+        self.audio_game_to_mapping_key = None
+        self.audio_memmap = None
+        if master_audio_dir and self.caption_modality in ("audio", "both"):
+            audio_map_path = os.path.join(master_audio_dir, "audio_mapping.json")
+            audio_dat_path = os.path.join(master_audio_dir, "audio_features.dat")
+            with open(audio_map_path, "r") as f:
+                self.audio_mapping = json.load(f)
+            self.audio_game_to_mapping_key = _build_game_to_mapping_key(self.audio_mapping)
+            a_rows, a_dim = _infer_memmap_shape(audio_dat_path, self.audio_mapping)
+            self.audio_memmap = np.memmap(audio_dat_path, mode='r', shape=(a_rows, a_dim), dtype='float32')
 
         for game_id, game in enumerate(tqdm(self.listGames, desc="Building caption index")):
             # Load labels only (features loaded lazily in __getitem__)
@@ -388,27 +413,46 @@ class SoccerNetCaptions(Dataset):
 
         return (feat_half1, feat_half2)
 
+    def _load_game_audio_features(self, game_id):
+        game_name = self.listGames[game_id]
+        entry = _resolve_mapping_entry(self.audio_mapping, game_name, game_id, self.audio_game_to_mapping_key)
+        half1_start = int(entry['half1_start'])
+        half1_len = int(entry['half1_len'])
+        half2_start = int(entry['half2_start'])
+        half2_len = int(entry['half2_len'])
+        feat_half1 = self.audio_memmap[half1_start : half1_start + half1_len]
+        feat_half2 = self.audio_memmap[half2_start: half2_start + half2_len]
+        return (feat_half1, feat_half2)
 
     def __getitem__(self, idx):
         """
         Args:
             index (int): Index
         Returns:
-            vfeats (np.array): clip of features.
-            caption_tokens (np.array): tokens of captions.
-            clip_id (np.array): clip id.
-            caption_id (np.array): caption id.
-            caption (List[strings]): list of original captions.
+            One or two feature clips (np.array), then caption_tokens, clip_id, caption_id, caption.
         """
         clip_id, (caption_id, caption) = self.data[idx]
         game_id = clip_id[0]
+        caption_tokens = self.text_processor(caption)
+        tail = (caption_tokens, clip_id[0], caption_id, caption)
+
+        if self.caption_modality == "audio":
+            game_audio = self._load_game_audio_features(game_id)
+            feats_audio = [None] * game_id + [game_audio]
+            afeats = self.video_processor(clip_id, feats_audio)
+            return (afeats,) + tail
+
         game_feats = self._load_game_features(game_id)
-        # VideoProcessor expects feats[video_id][half]; pass a list with only this game at index game_id
         feats_for_processor = [None] * game_id + [game_feats]
         vfeats = self.video_processor(clip_id, feats_for_processor)
-        caption_tokens = self.text_processor(caption)
 
-        return vfeats, caption_tokens, clip_id[0], caption_id, caption
+        if self.caption_modality == "both":
+            game_audio = self._load_game_audio_features(game_id)
+            feats_audio = [None] * game_id + [game_audio]
+            afeats = self.video_processor(clip_id, feats_audio)
+            return (vfeats, afeats) + tail
+
+        return (vfeats,) + tail
 
     def getCorpus(self, split=["train"]):
         """
@@ -482,7 +526,7 @@ class SoccerNetTextProcessor(object):
         return " ".join(self.vocab.lookup_tokens(tokens))
 
 class PredictionCaptions(Dataset):
-    def __init__(self, SoccerNetPath, PredictionPath, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15 ,mapping_json = "mapping.json", feature_file = "features.dat"):
+    def __init__(self, SoccerNetPath, PredictionPath, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15 ,mapping_json = "mapping.json", feature_file = "features.dat", master_audio_dir=None, caption_modality="video"):
         self.path = SoccerNetPath
         self.PredictionPath = PredictionPath
         self.listGames = getListGames(split, task="caption")
@@ -491,11 +535,26 @@ class PredictionCaptions(Dataset):
         self.version = version
         self.labels, _, self.dict_event, _ = getMetaDataTask("caption", "SoccerNet", version)
         self.split = split
+        self.caption_modality = str(caption_modality).strip().lower()
+        if self.caption_modality in ("audio", "both") and not master_audio_dir:
+            raise ValueError("master_audio_dir is required when caption_modality is 'audio' or 'both'")
         with open(mapping_json, "r") as f:
             self.mapping = json.load(f)
         self.game_to_mapping_key = _build_game_to_mapping_key(self.mapping)
         memmap_rows, memmap_dim = _infer_memmap_shape(feature_file, self.mapping)
         self.memmap = np.memmap(feature_file, mode='r', shape=(memmap_rows, memmap_dim), dtype='float32')
+
+        self.audio_mapping = None
+        self.audio_game_to_mapping_key = None
+        self.audio_memmap = None
+        if master_audio_dir and self.caption_modality in ("audio", "both"):
+            audio_map_path = os.path.join(master_audio_dir, "audio_mapping.json")
+            audio_dat_path = os.path.join(master_audio_dir, "audio_features.dat")
+            with open(audio_map_path, "r") as f:
+                self.audio_mapping = json.load(f)
+            self.audio_game_to_mapping_key = _build_game_to_mapping_key(self.audio_mapping)
+            a_rows, a_dim = _infer_memmap_shape(audio_dat_path, self.audio_mapping)
+            self.audio_memmap = np.memmap(audio_dat_path, mode='r', shape=(a_rows, a_dim), dtype='float32')
 
         
      
@@ -554,6 +613,16 @@ class PredictionCaptions(Dataset):
         #feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
         return (feat_half1, feat_half2)
 
+    def _load_game_audio_features(self, game_id):
+        game_name = self.listGames[game_id]
+        entry = _resolve_mapping_entry(self.audio_mapping, game_name, game_id, self.audio_game_to_mapping_key)
+        half1_start = int(entry['half1_start'])
+        half1_len = int(entry['half1_len'])
+        half2_start = int(entry['half2_start'])
+        half2_len = int(entry['half2_len'])
+        feat_half1 = self.audio_memmap[half1_start : half1_start + half1_len]
+        feat_half2 = self.audio_memmap[half2_start: half2_start + half2_len]
+        return (feat_half1, feat_half2)
 
     def __len__(self):
         return len(self.data)
@@ -563,15 +632,27 @@ class PredictionCaptions(Dataset):
         Args:
             index (int): Index
         Returns:
-            vfeats (np.array): clip of features.
-            clip_id (np.array): clip id.
-            caption_id (np.array): caption id.
+            Feature clip(s), clip_id, caption_id.
         """
         clip_id, caption_id = self.data[idx]
         game_id = clip_id[0]
+
+        if self.caption_modality == "audio":
+            game_audio = self._load_game_audio_features(game_id)
+            feats_audio = [None] * game_id + [game_audio]
+            afeats = self.video_processor(clip_id, feats_audio)
+            return afeats, clip_id[0], caption_id
+
         game_feats = self._load_game_features(game_id)
         feats_for_processor = [None] * game_id + [game_feats]
         vfeats = self.video_processor(clip_id, feats_for_processor)
+
+        if self.caption_modality == "both":
+            game_audio = self._load_game_audio_features(game_id)
+            feats_audio = [None] * game_id + [game_audio]
+            afeats = self.video_processor(clip_id, feats_audio)
+            return vfeats, afeats, clip_id[0], caption_id
+
         return vfeats, clip_id[0], caption_id
 
 
