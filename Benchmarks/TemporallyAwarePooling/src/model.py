@@ -1,5 +1,8 @@
 import __future__
 
+import logging
+import os
+
 import numpy as np
 import warnings
 
@@ -12,6 +15,74 @@ from transformer import Transformer_Audio, Transformer_Video, Transformer
 from dataset import SOS_TOKEN, EOS_TOKEN
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence, pad_packed_sequence
 import random
+
+
+def load_contrastive_video_weights(
+    pooling_layer,
+    contrastive_weights_path,
+    freeze_contrastive_encoder,
+    unfreeze_contrastive_projection,
+    multimodal_fusion=False,
+):
+    """Load sbertcontrastive (or compatible) weights into video_proj / embedding_video / video_transformer.
+
+    For ``Transformer_Video``, the whole ``pooling_layer`` is the video encoder. For multimodal ``Transformer``,
+    only keys present in both checkpoint and module are loaded (typically ``video_*``); audio stays random init.
+    Skips tensors with shape mismatch (e.g. different ``video_feat_dim`` on ``video_proj``).
+    """
+    if not contrastive_weights_path:
+        return
+    if not os.path.exists(contrastive_weights_path):
+        logging.warning("Could not find contrastive checkpoint at %s; skipping preload.", contrastive_weights_path)
+        return
+
+    logging.info("Loading contrastive video weights from %s", contrastive_weights_path)
+    checkpoint = torch.load(contrastive_weights_path, map_location=torch.device("cpu"))
+    state_dict = checkpoint["model_video"] if isinstance(checkpoint, dict) and "model_video" in checkpoint else checkpoint
+
+    target_sd = pooling_layer.state_dict()
+    compatible = {}
+    for k, v in state_dict.items():
+        if k not in target_sd:
+            continue
+        if target_sd[k].shape != v.shape:
+            logging.warning(
+                "Skipping contrastive key %s: checkpoint shape %s vs model %s",
+                k,
+                tuple(v.shape),
+                tuple(target_sd[k].shape),
+            )
+            continue
+        compatible[k] = v
+
+    missing, unexpected = pooling_layer.load_state_dict(compatible, strict=False)
+    if compatible:
+        logging.info(
+            "Contrastive load: merged %d tensors (strict=False; missing keys expected for audio in fusion).",
+            len(compatible),
+        )
+    else:
+        logging.warning("No contrastive tensors matched the video branch; check architecture and input dims.")
+
+    if not freeze_contrastive_encoder:
+        return
+
+    if multimodal_fusion:
+        for name, param in pooling_layer.named_parameters():
+            if name.startswith("video_"):
+                param.requires_grad = False
+        if unfreeze_contrastive_projection and hasattr(pooling_layer, "video_transformer"):
+            logging.info("Unfreezing last video transformer encoder block (fusion model).")
+            for param in pooling_layer.video_transformer.layers[-1].parameters():
+                param.requires_grad = True
+    else:
+        for param in pooling_layer.parameters():
+            param.requires_grad = False
+        if unfreeze_contrastive_projection and hasattr(pooling_layer, "video_transformer"):
+            logging.info("Unfreezing last video transformer encoder block.")
+            for param in pooling_layer.video_transformer.layers[-1].parameters():
+                param.requires_grad = True
+
 
 class VideoEncoder(nn.Module):
     def __init__(self, input_size=512, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD"):
@@ -118,7 +189,6 @@ class VideoEncoder(nn.Module):
 
 class MultimodalTransformerCaption(nn.Module):
     def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, audio_feat_dim=None):
-        import os
         '''
         Same as the video encoder but we have audio and a transformer now
         Using the same recepie as above but tweaking to incorporate audio as well
@@ -139,22 +209,13 @@ class MultimodalTransformerCaption(nn.Module):
         
         if self.pool == "Transformer_Video":
             self.pooling_layer = Transformer_Video(video_feat_dim=self.input_size, video_d_model=512, video_nhead=8, video_num_layers=2, video_length=self.window_size_frame)
-            if contrastive_weights_path is not None:
-                if os.path.exists(contrastive_weights_path):
-                    print("Pretrained aggregator found, loading")
-                    checkpoint = torch.load(contrastive_weights_path)
-                    state_dict = checkpoint["model_video"] if isinstance(checkpoint, dict) and "model_video" in checkpoint else checkpoint
-                    self.pooling_layer.load_state_dict(state_dict)
-                    if freeze_contrastive_encoder:
-                        print("Freezing all layers")
-                        for param in self.pooling_layer.parameters():
-                            param.requires_grad = False
-                        if unfreeze_contrastive_projection and hasattr(self.pooling_layer, "video_transformer"):
-                            print("unfreezing last transformer encoder block")
-                            for param in self.pooling_layer.video_transformer.layers[-1].parameters():
-                                param.requires_grad = True
-                else:
-                    print(f"Could not find the pretrained aggregator so skipping preload.")
+            load_contrastive_video_weights(
+                self.pooling_layer,
+                contrastive_weights_path,
+                freeze_contrastive_encoder,
+                unfreeze_contrastive_projection,
+                multimodal_fusion=False,
+            )
             self.hidden_size = 512
         elif self.pool == "Transformer_Audio":
             self.pooling_layer = Transformer_Audio(
@@ -178,6 +239,13 @@ class MultimodalTransformerCaption(nn.Module):
                 video_nhead=8,
                 video_num_layers=2,
                 video_length=self.window_size_frame,
+            )
+            load_contrastive_video_weights(
+                self.pooling_layer,
+                contrastive_weights_path,
+                freeze_contrastive_encoder,
+                unfreeze_contrastive_projection,
+                multimodal_fusion=True,
             )
             self.hidden_size = 1024
     def forward(self, audio_feats=None, video_feats=None):
