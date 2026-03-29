@@ -13,6 +13,12 @@ your PC or Kaggle bundle to Drive/Colab and pass ``--reference_mapping_json``, o
 next to ``--out_feature_file``. Default search also tries
 ``<parent of audio_root>/master/mapping.json``.
 
+Use ``--align_halves_to_reference_lens`` when real audio ``.npy`` row counts do not match
+the video pipeline's **unpadded** half lengths (``half*_len`` minus left/right window pad).
+Each half is resampled along time with linear interpolation so, after the same ``np.pad`` as
+video, ``audio_mapping.json`` matches ``mapping.json`` — run ``verify_av_memmap_alignment.py``
+to confirm.
+
 Embedding width is inferred from the **first** game (in split order) that has both half
 ``.npy`` files. If **no** game has npy files (all zero-filled), ``--audio_feature_dim``
 defaults to **128** (VGGish). Override if your vectors use another size.
@@ -150,6 +156,25 @@ def load_half(path: Path, feature_dim: int | None) -> np.ndarray:
     return arr
 
 
+def align_time_axis_to_length(arr: np.ndarray, target_t: int) -> np.ndarray:
+    """Resize (T, D) along T to ``target_t`` via linear interpolation (inclusive endpoints)."""
+    arr = np.asarray(arr, dtype=np.float32)
+    t, d = int(arr.shape[0]), int(arr.shape[1])
+    if target_t < 1:
+        raise ValueError(f"align_time_axis_to_length: target_t must be >= 1, got {target_t}")
+    if t == target_t:
+        return arr
+    if t == 0:
+        return np.zeros((target_t, d), dtype=np.float32)
+    old_x = np.linspace(0.0, 1.0, t, dtype=np.float64)
+    new_x = np.linspace(0.0, 1.0, target_t, dtype=np.float64)
+    out = np.empty((target_t, d), dtype=np.float32)
+    ad = arr.astype(np.float64, copy=False)
+    for j in range(d):
+        out[:, j] = np.interp(new_x, old_x, ad[:, j]).astype(np.float32)
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Audio embedding memmap builder (see NOTEBOOK_CONFIG for Colab paste)."
@@ -189,6 +214,15 @@ def main() -> None:
         type=int,
         default=128,
         help="Fallback embedding width when no .npy exists in the split (all zero-fill). Default 128 (VGGish).",
+    )
+    parser.add_argument(
+        "--align_halves_to_reference_lens",
+        action="store_true",
+        help=(
+            "For games with real .npy halves, resample each half along time so raw T matches "
+            "video mapping (half*_len minus l_pad/r_pad) before np.pad. Ensures audio_mapping "
+            "half*_len match video mapping.json when verify script is run."
+        ),
     )
 
     if _in_notebook():
@@ -243,6 +277,12 @@ def main() -> None:
     with open(ref_path, encoding="utf-8") as f:
         ref_mapping: dict[str, dict[str, int]] = json.load(f)
     print(f"Using video mapping for missing-audio zero-fill: {ref_path}", file=sys.stderr)
+    if args.align_halves_to_reference_lens:
+        print(
+            "align_halves_to_reference_lens: real audio halves will be time-resampled to "
+            "match video raw half lengths before padding.",
+            file=sys.stderr,
+        )
 
     inferred = infer_feature_dim_from_first_audio_npy(
         games,
@@ -278,6 +318,23 @@ def main() -> None:
         if p1.is_file() and p2.is_file():
             f1 = load_half(p1, feature_dim)
             f2 = load_half(p2, feature_dim)
+            if args.align_halves_to_reference_lens:
+                key = str(idx)
+                if key not in ref_mapping:
+                    raise KeyError(
+                        f"reference mapping missing key {key!r} for align_halves (game {game!r})"
+                    )
+                e = ref_mapping[key]
+                t1 = int(e["half1_len"]) - l_pad - r_pad
+                t2 = int(e["half2_len"]) - l_pad - r_pad
+                if t1 < 1 or t2 < 1:
+                    raise ValueError(
+                        f"{game}: invalid raw half lengths from ref (t1={t1}, t2={t2}); "
+                        f"half1_len={e['half1_len']}, half2_len={e['half2_len']}, "
+                        f"l_pad={l_pad}, r_pad={r_pad}"
+                    )
+                f1 = align_time_axis_to_length(f1, t1)
+                f2 = align_time_axis_to_length(f2, t2)
             return f1, f2, False
         key = str(idx)
         if key not in ref_mapping:
