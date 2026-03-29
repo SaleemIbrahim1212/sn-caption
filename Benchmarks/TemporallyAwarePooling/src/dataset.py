@@ -12,7 +12,7 @@ import torch
 
 import logging
 import json
-
+from functools import lru_cache
 from collections import Counter
 from torchtext.vocab import vocab
 
@@ -25,6 +25,55 @@ import numpy as np
 PAD_TOKEN = 0
 SOS_TOKEN = 1
 EOS_TOKEN = 2
+
+def _infer_memmap_shape(feature_file, mapping, default_feature_dim=8576, dtype=np.float32):
+    itemsize = np.dtype(dtype).itemsize
+    file_size = os.path.getsize(feature_file)
+
+    max_end = 0
+    for entry in mapping.values():
+        try:
+            half1_end = int(entry["half1_start"]) + int(entry["half1_len"])
+            half2_end = int(entry["half2_start"]) + int(entry["half2_len"])
+            max_end = max(max_end, half1_end, half2_end)
+        except (KeyError, TypeError, ValueError):
+            continue
+
+    if max_end > 0 and file_size % (max_end * itemsize) == 0:
+        feature_dim = file_size // (max_end * itemsize)
+        if feature_dim > 0:
+            return int(max_end), int(feature_dim)
+
+    row_bytes = default_feature_dim * itemsize
+    if file_size % row_bytes != 0:
+        raise ValueError(
+            f"Cannot infer memmap shape for {feature_file}. "
+            f"file_size={file_size} is not divisible by default row_bytes={row_bytes}."
+        )
+    return int(file_size // row_bytes), int(default_feature_dim)
+
+def _build_game_to_mapping_key(mapping):
+    if not mapping:
+        return {}
+    keys = list(mapping.keys())
+    if not all(str(k).isdigit() for k in keys):
+        return {}
+    full_games = getListGames(["train", "valid", "test"], task="caption")
+    return {game: str(i) for i, game in enumerate(full_games) if str(i) in mapping}
+
+def _resolve_mapping_entry(mapping, game_name, game_id, game_to_mapping_key):
+    if game_name in mapping:
+        return mapping[game_name]
+    mapped_key = game_to_mapping_key.get(game_name)
+    if mapped_key is not None and mapped_key in mapping:
+        return mapping[mapped_key]
+    local_key = str(game_id)
+    if local_key in mapping:
+        return mapping[local_key]
+    raise KeyError(
+        f"No mapping entry found for game '{game_name}' (local id={game_id}). "
+        "Check mapping_json consistency with the selected split."
+    )
 
 def collate_fn_padd(batch):
     '''
@@ -268,7 +317,7 @@ class SoccerNetCaptions(Dataset):
     """
     This class is used to download and pre-compute clips and captions from the SoccerNet dataset for captining training phase.
     """
-    def __init__(self, path, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15):
+    def __init__(self, path, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15, mapping_json = "mapping.json", feature_file = "features.dat" ):
         self.path = path
         split = [s for s in split if s!= "challenge"]
         self.listGames = getListGames(split, task="caption")
@@ -282,37 +331,38 @@ class SoccerNetCaptions(Dataset):
         downloader.downloadGames(files=[self.labels, f"1_{self.features}", f"2_{self.features}"], task="caption",split=split, verbose=False,randomized=True)
 
         self.data = list()
-        self.game_feats = list()
+        self.l_pad = self.window_size_frame//2 + self.window_size_frame%2
+        self.r_pad = self.window_size_frame//2
+        with open(mapping_json, "r") as f:
+            self.mapping = json.load(f)
+        self.game_to_mapping_key = _build_game_to_mapping_key(self.mapping)
+        memmap_rows, memmap_dim = _infer_memmap_shape(feature_file, self.mapping)
+        self.memmap = np.memmap(feature_file, mode='r', shape=(memmap_rows, memmap_dim), dtype='float32')
 
-        l_pad = self.window_size_frame//2 + self.window_size_frame%2
-        r_pad = self.window_size_frame//2 
-
-        for game_id, game in enumerate(tqdm(self.listGames)):
-            # Load features
-            feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
-            feat_half1 = np.pad(feat_half1.reshape(-1, feat_half1.shape[-1]), ((l_pad, r_pad), (0, 0)), "edge")
-            feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
-            feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((l_pad, r_pad), (0, 0)), "edge")
-            
-            self.game_feats.append((feat_half1, feat_half2)) 
-
-            # Load labels
+        for game_id, game in enumerate(tqdm(self.listGames, desc="Building caption index")):
+            # Load labels only (features loaded lazily in __getitem__)
             labels = json.load(open(os.path.join(self.path, game, self.labels)))
-            
+
             for caption_id, annotation in enumerate(labels["annotations"]):
+                
 
                 time = annotation["gameTime"]
                 event = annotation["label"]
+
+                event_clean = str(event).strip().lower()
+                #Removing these labels as the paper suggested these are completely out of distribution labels 
+                if event_clean in {"funfact", "attendance"}:
+                    continue
                 half = int(time[0])
                 if event not in self.dict_event or half > 2:
                     continue
 
                 minutes, seconds = time.split(' ')[-1].split(':')
                 minutes, seconds = int(minutes), int(seconds)
-                frame = framerate * ( seconds + 60 * minutes) 
-                
+                frame = framerate * ( seconds + 60 * minutes)
+
                 self.data.append(((game_id, half-1, frame) , (caption_id, annotation['anonymized'])))
-        
+
         #launch a VideoProcessor that will create a clip around a caption
         self.video_processor = SoccerNetVideoProcessor(self.window_size_frame)
         #launch a TextProcessor that will tokenize a caption
@@ -321,6 +371,23 @@ class SoccerNetCaptions(Dataset):
 
     def __len__(self):
         return len(self.data)
+
+    def _load_game_features(self, game_id):
+        return self._cached_load(game_id) # Adding this to help with loading data 
+
+    def _cached_load(self, game_id):
+        """Load and pad features for a single game (lazy loading)."""
+        game_name = self.listGames[game_id]
+        entry = _resolve_mapping_entry(self.mapping, game_name, game_id, self.game_to_mapping_key)
+        half1_start = int(entry['half1_start'])
+        half1_len = int(entry['half1_len'])
+        half2_start = int(entry['half2_start'])
+        half2_len = int(entry['half2_len'])
+        feat_half1 = self.memmap[half1_start : half1_start + half1_len]
+        feat_half2 = self.memmap[half2_start: half2_start + half2_len]
+
+        return (feat_half1, feat_half2)
+
 
     def __getitem__(self, idx):
         """
@@ -334,11 +401,15 @@ class SoccerNetCaptions(Dataset):
             caption (List[strings]): list of original captions.
         """
         clip_id, (caption_id, caption) = self.data[idx]
-        vfeats = self.video_processor(clip_id, self.game_feats)
-        caption_tokens = self.text_processor(caption)    
-        
+        game_id = clip_id[0]
+        game_feats = self._load_game_features(game_id)
+        # VideoProcessor expects feats[video_id][half]; pass a list with only this game at index game_id
+        feats_for_processor = [None] * game_id + [game_feats]
+        vfeats = self.video_processor(clip_id, feats_for_processor)
+        caption_tokens = self.text_processor(caption)
+
         return vfeats, caption_tokens, clip_id[0], caption_id, caption
-    
+
     def getCorpus(self, split=["train"]):
         """
         Args:
@@ -389,9 +460,14 @@ class SoccerNetTextProcessor(object):
         spacy_token.add_special_case("[TEAM]", [{"ORTH": "[TEAM]"}])
         spacy_token.add_special_case("([TEAM])", [{"ORTH": "([TEAM])"}])
         spacy_token.add_special_case("[REFEREE]", [{"ORTH": "[REFEREE]"}])
-        self.tokenizer = lambda s: [c.text for c in spacy_token(s)]
+        # self.tokenizer = lambda s: [c.text for c in spacy_token(s)]
+        self.spacy_token = spacy_token
         self.min_freq = min_freq
         self.build_vocab(corpus)
+    
+    def tokenizer(self, s):
+        """Tokenize a string using spaCy. This method is picklable for multiprocessing."""
+        return [c.text for c in self.spacy_token(s)]
     
     def build_vocab(self, corpus):
         counter = Counter([token for c in corpus for token in self.tokenizer(c)])
@@ -406,7 +482,7 @@ class SoccerNetTextProcessor(object):
         return " ".join(self.vocab.lookup_tokens(tokens))
 
 class PredictionCaptions(Dataset):
-    def __init__(self, SoccerNetPath, PredictionPath, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15):
+    def __init__(self, SoccerNetPath, PredictionPath, features="ResNET_TF2_PCA512.npy", split=["train"], version=2, framerate=2, window_size=15 ,mapping_json = "mapping.json", feature_file = "features.dat"):
         self.path = SoccerNetPath
         self.PredictionPath = PredictionPath
         self.listGames = getListGames(split, task="caption")
@@ -415,29 +491,25 @@ class PredictionCaptions(Dataset):
         self.version = version
         self.labels, _, self.dict_event, _ = getMetaDataTask("caption", "SoccerNet", version)
         self.split = split
+        with open(mapping_json, "r") as f:
+            self.mapping = json.load(f)
+        self.game_to_mapping_key = _build_game_to_mapping_key(self.mapping)
+        memmap_rows, memmap_dim = _infer_memmap_shape(feature_file, self.mapping)
+        self.memmap = np.memmap(feature_file, mode='r', shape=(memmap_rows, memmap_dim), dtype='float32')
 
+        
+     
         logging.info("Checking/Download features and labels locally")
         downloader = SoccerNetDownloader(self.path)
         downloader.downloadGames(files=[f"1_{self.features}", f"2_{self.features}"], task="caption", split=split, verbose=False,randomized=True)
 
         self.data = list()
-        self.game_feats = list()
+        self.l_pad = self.window_size_frame//2 + self.window_size_frame%2
+        self.r_pad = self.window_size_frame//2
 
-        l_pad = self.window_size_frame//2 + self.window_size_frame%2
-        r_pad = self.window_size_frame//2 
-
-        for game_id, game in enumerate(tqdm(self.listGames)):
-            # Load features
-            feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
-            feat_half1 = np.pad(feat_half1.reshape(-1, feat_half1.shape[-1]), ((l_pad, r_pad), (0, 0)), "edge")
-            feat_half2 = np.load(os.path.join(self.path, game, "2_" + self.features))
-            feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((l_pad, r_pad), (0, 0)), "edge")
-            
-            self.game_feats.append((feat_half1, feat_half2)) 
-
-            # Load labels
+        for game_id, game in enumerate(tqdm(self.listGames, desc="Building prediction index")):
             preds = json.load(open(os.path.join(self.PredictionPath, game, "results_spotting.json")))
-            
+
             for caption_id, annotation in enumerate(preds["predictions"]):
 
                 if annotation["label"] not in self.dict_event:
@@ -450,16 +522,39 @@ class PredictionCaptions(Dataset):
 
                 minutes, seconds = time.split(' ')[-1].split(':')
                 minutes, seconds = int(minutes), int(seconds)
-                frame = framerate * ( int(seconds) + 60 * int(minutes)) 
-                
+                frame = framerate * ( int(seconds) + 60 * int(minutes))
+
                 self.data.append(((game_id, half-1, frame), caption_id))
-        
+
         #launch a VideoProcessor that will create a clip around a caption
         self.video_processor = SoccerNetVideoProcessor(self.window_size_frame)
         #launch a TextProcessor that will tokenize a caption
         self.text_processor = SoccerNetTextProcessor(self.getCorpus(split=["train"]))
         self.vocab_size = len(self.text_processor.vocab)
-    
+
+    def _load_game_features(self, game_id):
+        return self._cached_load(game_id) # Adding this to help with loading data 
+
+    def _cached_load(self, game_id):
+        """Load and pad features for a single game (lazy loading)."""
+        game_name = self.listGames[game_id]
+        entry = _resolve_mapping_entry(self.mapping, game_name, game_id, self.game_to_mapping_key)
+        half1_start = int(entry['half1_start'])
+        half1_len = int(entry['half1_len'])
+        half2_start = int(entry['half2_start'])
+        half2_len = int(entry['half2_len'])
+        feat_half1 = self.memmap[half1_start : half1_start + half1_len]
+        feat_half2 = self.memmap[half2_start: half2_start + half2_len]
+
+
+        #game = self.listGames[game_id]
+        #feat_half1 = np.load(os.path.join(self.path, game, "1_" + self.features))
+        #
+        #feat_half2 = 
+        #feat_half2 = np.pad(feat_half2.reshape(-1, feat_half2.shape[-1]), ((self.l_pad, self.r_pad), (0, 0)), "edge")
+        return (feat_half1, feat_half2)
+
+
     def __len__(self):
         return len(self.data)
 
@@ -473,7 +568,10 @@ class PredictionCaptions(Dataset):
             caption_id (np.array): caption id.
         """
         clip_id, caption_id = self.data[idx]
-        vfeats = self.video_processor(clip_id, self.game_feats)   
+        game_id = clip_id[0]
+        game_feats = self._load_game_features(game_id)
+        feats_for_processor = [None] * game_id + [game_feats]
+        vfeats = self.video_processor(clip_id, feats_for_processor)
         return vfeats, clip_id[0], caption_id
 
 

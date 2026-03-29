@@ -6,17 +6,43 @@ import numpy as np
 from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
 
 import torch
-
 from dataset import SoccerNetCaptions, PredictionCaptions, collate_fn_padd
-from model import Video2Caption
+from model import Video2Caption, SoccerNetTransformerCaption
 from train import trainer, test_captioning, validate_captioning
 
 from utils import valid_probability
 
 import wandb
 
+def resolve_device(args):
+    if getattr(args, "device", None) is not None:
+        return torch.device(args.device)
+    if getattr(args, "GPU", -1) >= 0 and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def resolve_caption_pool(args):
+    caption_type = str(getattr(args, "caption_type", "baseline")).strip().lower()
+    if caption_type != "transformer":
+        return args.pool
+
+    modality = str(getattr(args, "transformer_modality", "video")).strip().lower()
+    modality_to_pool = {
+        "video": "Transformer_Video",
+        "audio": "Transformer_Audio",
+        "both": "Transformer",
+    }
+    if modality not in modality_to_pool:
+        raise ValueError(
+            f"Incorrect modality --transformer_modality='{modality}'. "
+        )
+    return modality_to_pool[modality]
+
 
 def main(args):
+    device = resolve_device(args)
+    caption_pool = resolve_caption_pool(args)
 
     logging.info("Parameters:")
     for arg in vars(args):
@@ -24,49 +50,99 @@ def main(args):
 
     # create dataset
     if not args.test_only:
-        dataset_Train = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
-        dataset_Valid = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
-        dataset_Valid_metric  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
-    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+        dataset_Train = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
+        dataset_Valid = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
+        dataset_Valid_metric  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
+    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
 
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][0].shape[-1]
         print("feature_dim found:", args.feature_dim)
     # create model
-    model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
+
+    if str(args.caption_type).strip().lower() == "transformer":
+        model = SoccerNetTransformerCaption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                   window_size=args.window_size_caption, 
-                  vlad_k = args.vlad_k,
                   framerate=args.framerate,
-                  pool=args.pool,
+                  pool=caption_pool,
                   num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).cuda()
+                  teacher_forcing_ratio=args.teacher_forcing_ratio,
+                  word_dropout=args.word_dropout,
+                  freeze_encoder=args.freeze_encoder,
+                  weights_encoder=args.weights_encoder,
+                  contrastive_weights_path=args.contrastive_weights_path,
+                  freeze_contrastive_encoder=args.freeze_contrastive_encoder,
+                  unfreeze_contrastive_projection=args.unfreeze_contrastive_projection).to(device)
+    else:
+        model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
+                    window_size=args.window_size_caption, 
+                    vlad_k = args.vlad_k,
+                    framerate=args.framerate,
+                    pool=args.pool,
+                    num_layers=args.num_layers,
+                    teacher_forcing_ratio=args.teacher_forcing_ratio, word_dropout=args.word_dropout, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
+        
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
     parameters_per_layer  = [p.numel() for p in model.parameters() if p.requires_grad]
     logging.info("Total number of parameters: " + str(total_params))
 
-    # create dataloader
     if not args.test_only:
+        #rng = np.random.default_rng(args.seed)  
+        #rng.shuffle(dataset_Train.data) # Doing this because shuffling has been turned off
         train_loader = torch.utils.data.DataLoader(dataset_Train,
             batch_size=args.batch_size, shuffle=True,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
+            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd, persistent_workers=(args.max_num_worker > 0) )
 
         val_loader = torch.utils.data.DataLoader(dataset_Valid,
             batch_size=args.batch_size, shuffle=False,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
+            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd, persistent_workers = (args.max_num_worker > 0) )
 
         val_metric_loader = torch.utils.data.DataLoader(dataset_Valid_metric,
             batch_size=args.batch_size, shuffle=False,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
+            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd,  persistent_workers = (args.max_num_worker > 0))
 
 
     # training parameters
     if not args.test_only:
-        criterion = torch.nn.CrossEntropyLoss()
-        optimizer = torch.optim.Adam(model.parameters(), lr=args.LR, 
-                                    betas=(0.9, 0.999), eps=1e-08, 
-                                    weight_decay=0, amsgrad=False)
+        criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
+        if str(args.caption_type).strip().lower() == "transformer":
+            named_params = [(name, param) for name, param in model.named_parameters() if param.requires_grad]
+            layer0_names = (
+                "encoder.pooling_layer.video_transformer.layers.0.",
+                "encoder.pooling_layer.audio_transformer.layers.0.",
+            )
+            layer1_names = (
+                "encoder.pooling_layer.video_transformer.layers.1.",
+                "encoder.pooling_layer.audio_transformer.layers.1.",
+            )
+            encoder_layer0_params = [param for name, param in named_params if any(token in name for token in layer0_names)]
+            encoder_layer1_params = [param for name, param in named_params if any(token in name for token in layer1_names)]
+            layer_param_ids = {id(p) for p in encoder_layer0_params + encoder_layer1_params}
+            other_encoder_params = [
+                param for name, param in named_params
+                if name.startswith("encoder.") and id(param) not in layer_param_ids
+            ]
+            other_params = [param for name, param in named_params if not name.startswith("encoder.")]
+            param_groups = []
+            if other_params:
+                param_groups.append({"params": other_params, "lr": args.LR})
+            if other_encoder_params:
+                param_groups.append({"params": other_encoder_params, "lr": 1e-5})
+            if encoder_layer0_params:
+                param_groups.append({"params": encoder_layer0_params, "lr": 1e-5})
+            if encoder_layer1_params:
+                param_groups.append({"params": encoder_layer1_params, "lr": 2e-5})
+            optimizer = torch.optim.Adam(param_groups, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+            logging.info(
+                "Transformer optimizer groups: non-encoder=%d (lr=%.2e), encoder other=%d (lr=1e-5), layer0=%d (lr=1e-5), layer1=%d (lr=2e-5)",
+                len(other_params), args.LR, len(other_encoder_params), len(encoder_layer0_params), len(encoder_layer1_params)
+            )
+        else:
+            optimizer = torch.optim.Adam(model.parameters(), lr=args.LR,
+                                        betas=(0.9, 0.999), eps=1e-08,
+                                        weight_decay=0, amsgrad=False)
 
 
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True, patience=args.patience)
@@ -75,12 +151,13 @@ def main(args):
         trainer("caption", train_loader, val_loader, val_metric_loader, 
                 model, optimizer, scheduler, criterion,
                 model_name=args.model_name,
-                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency)
+                max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency,
+                log_every_n_batches=args.log_every_n_batches)
 
     # For the best model only
-    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"))
+    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
-    model = model.cuda()
+    model = model.to(device)
 
     # validate caption generation on groundtruth spots on multiple splits [test/challenge]
     for split in args.split_test:
@@ -88,17 +165,23 @@ def main(args):
         dataset_Test  = SoccerNetCaptions(
             path=args.SoccerNet_path,
             features=args.features,
-            split=args.split_test,
+            split=[split],
             version=args.version,
             framerate=args.framerate,
             window_size=args.window_size_caption,
+            mapping_json=args.mapping_json,
+            feature_file=args.feature_file,
             )
 
         test_loader = torch.utils.data.DataLoader(dataset_Test,
             batch_size=args.batch_size, shuffle=False,
             num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd)
 
-        results = validate_captioning(test_loader, model, args.model_name)
+        try:
+            results = validate_captioning(test_loader, model, args.model_name)
+        except ImportError as e:
+            logging.warning(f"Skipping caption validation: {e}")
+            continue
         if results is None:
             continue
 
@@ -117,24 +200,41 @@ def main(args):
     return 
 
 def dvc(args):
+    device = resolve_device(args)
+    caption_pool = resolve_caption_pool(args)
 
     logging.info("Parameters:")
     for arg in vars(args):
         logging.info(arg.rjust(15) + " : " + str(getattr(args, arg)))
 
-    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+    dataset_Test  = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
 
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][0].shape[-1]
         print("feature_dim found:", args.feature_dim)
     # create model
-    model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
+
+    if str(args.caption_type).strip().lower() == "transformer":
+        model = SoccerNetTransformerCaption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                   window_size=args.window_size_caption, 
-                  vlad_k = args.vlad_k,
                   framerate=args.framerate,
-                  pool=args.pool,
+                  pool=caption_pool,
                   num_layers=args.num_layers,
-                  teacher_forcing_ratio=args.teacher_forcing_ratio).cuda()
+                  teacher_forcing_ratio=args.teacher_forcing_ratio,
+                  word_dropout=args.word_dropout,
+                  freeze_encoder=args.freeze_encoder,
+                  weights_encoder=args.weights_encoder,
+                  contrastive_weights_path=args.contrastive_weights_path,
+                  freeze_contrastive_encoder=args.freeze_contrastive_encoder,
+                  unfreeze_contrastive_projection=args.unfreeze_contrastive_projection).to(device)
+    else: 
+        model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
+                    window_size=args.window_size_caption, 
+                    vlad_k = args.vlad_k,
+                    framerate=args.framerate,
+                    pool=args.pool,
+                    num_layers=args.num_layers,
+                    teacher_forcing_ratio=args.teacher_forcing_ratio, word_dropout=args.word_dropout).to(device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -142,14 +242,14 @@ def dvc(args):
     logging.info("Total number of parameters: " + str(total_params))
 
     # For the best model only
-    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"))
+    checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
-    model = model.cuda()
+    model = model.to(device)
 
     # generate dense caption on multiple splits [test/challenge]
     for split in args.split_test:
         PredictionPath = os.path.join("models", args.model_name, f"outputs/{split}")
-        dataset_Test  = PredictionCaptions(SoccerNetPath=args.SoccerNet_path, PredictionPath=PredictionPath, features=args.features, split=[split], version=args.version, framerate=args.framerate, window_size=args.window_size_caption)
+        dataset_Test  = PredictionCaptions(SoccerNetPath=args.SoccerNet_path, PredictionPath=PredictionPath, features=args.features, split=[split], version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
 
         test_loader = torch.utils.data.DataLoader(dataset_Test,
             batch_size=args.batch_size, shuffle=False,
@@ -190,6 +290,8 @@ if __name__ == '__main__':
 
     parser.add_argument('--SoccerNet_path',   required=False, type=str,   default="/path/to/SoccerNet/",     help='Path for SoccerNet' )
     parser.add_argument('--features',   required=False, type=str,   default="ResNET_TF2.npy",     help='Video features' )
+    parser.add_argument('--mapping_json', required=False, type=str, default="mapping.json", help='Path to memmap row mapping json')
+    parser.add_argument('--feature_file', required=False, type=str, default="features.dat", help='Path to memmap feature file')
     parser.add_argument('--max_epochs',   required=False, type=int,   default=1000,     help='Maximum number of epochs' )
     parser.add_argument('--load_weights',   required=False, type=str,   default=None,     help='weights to load' )
     parser.add_argument('--model_name',   required=False, type=str,   default="NetVLAD++",     help='named of the model to save' )
@@ -202,17 +304,25 @@ if __name__ == '__main__':
     parser.add_argument('--version', required=False, type=int,   default=2,     help='Version of the dataset' )
     parser.add_argument('--feature_dim', required=False, type=int,   default=None,     help='Number of input features' )
     parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Number of chunks per epoch' )
+    parser.add_argument('--log_every_n_batches', required=False, type=int, default=50, help='Log caption batch stats every N batches (<=0 disables)' )
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )
     parser.add_argument('--window_size_caption', required=False, type=int,   default=15,     help='Size of the chunk (in seconds)' )
-    parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool' )
+    parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool for non-transformer captioning' )
+    parser.add_argument('--transformer_modality', required=False, type=str, choices=["video", "audio", "both"], default="video", help='Transformer modality to run when --caption_type=Transformer' )
     parser.add_argument('--vlad_k',       required=False, type=int,   default=64, help='Size of the vocabulary for NetVLAD' )
     parser.add_argument('--min_freq',       required=False, type=int,   default=5, help='Minimum word frequency to the vocabulary for caption generation' )
     
     parser.add_argument('--teacher_forcing_ratio',  required=False, type=valid_probability,   default=1, help='Teacher forcing ratio to use' )
+    parser.add_argument('--word_dropout', required=False, type=valid_probability, default=0.4, help='Word dropout probability in decoder teacher forcing path')
     parser.add_argument('--num_layers',  required=False, type=int,   default=2, help='Teacher forcing ratio to use' )
     parser.add_argument('--freeze_encoder',  required=False, type=bool, default=False)
     parser.add_argument('--pretrain',   required=False, action='store_true',  help='Perform testing only' )
     parser.add_argument('--weights_encoder',  required=False, type=str, default=None)
+    parser.add_argument('--contrastive_weights_path', required=False, type=str, default=None, help='Path to contrastive encoder checkpoint to preload Transformer_Video')
+    parser.add_argument('--freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_true', help='Freeze Transformer_Video encoder after loading --contrastive_weights_path')
+    parser.add_argument('--no_freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_false', help='Do not freeze Transformer_Video encoder after loading --contrastive_weights_path')
+    parser.add_argument('--unfreeze_contrastive_projection', action='store_true', help='When --freeze_contrastive_encoder is set, keep encoder.pooling_layer.video_proj trainable')
+    parser.set_defaults(freeze_contrastive_encoder=False)
     parser.add_argument('--first_stage',  required=False, type=str,  choices=["spotting", "caption"], default="spotting")
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )
@@ -221,8 +331,10 @@ if __name__ == '__main__':
     parser.add_argument('--patience', required=False, type=int,   default=10,     help='Patience before reducing LR (ReduceLROnPlateau)' )
 
     parser.add_argument('--GPU',        required=False, type=int,   default=-1,     help='ID of the GPU to use' )
+    parser.add_argument('--device',     required=False, type=str,   default=None,   help='torch device (e.g., cpu, cuda, cuda:0)' )
     parser.add_argument('--max_num_worker',   required=False, type=int,   default=4, help='number of worker to load data')
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
+    parser.add_argument('--caption_type',   required=False, type=str, choices=['Transformer', 'Baseline', 'transformer', 'baseline'], default='Baseline', help='Caption model type')
 
     parser.add_argument('--loglevel',   required=False, type=str,   default='INFO', help='logging level')
 
@@ -259,6 +371,8 @@ if __name__ == '__main__':
     if args.GPU >= 0:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+    if args.device is None:
+        args.device = "cuda" if args.GPU >= 0 and torch.cuda.is_available() else "cpu"
 
 
     start=time.time()

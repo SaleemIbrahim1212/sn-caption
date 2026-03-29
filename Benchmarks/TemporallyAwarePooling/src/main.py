@@ -33,12 +33,15 @@ if __name__ == '__main__':
     parser.add_argument('--feature_dim', required=False, type=int,   default=None,     help='Number of input features' )
     parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Number of chunks per epoch' )
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )
-    parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool' )
+    parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool for spotting and non-transformer captioning' )
+    parser.add_argument('--transformer_modality', required=False, type=str, choices=["video", "audio", "both"], default="video", help='Transformer modality to run when --caption_type=Transformer' )
     parser.add_argument('--vlad_k',       required=False, type=int,   default=64, help='Size of the vocabulary for NetVLAD' )
     parser.add_argument('--NMS_window',       required=False, type=int,   default=30, help='NMS window in second' )
     parser.add_argument('--NMS_threshold',       required=False, type=float,   default=0.0, help='NMS threshold for positive results' )
     parser.add_argument('--min_freq',       required=False, type=int,   default=5, help='Minimum word frequency to the vocabulary for caption generation' )
     parser.add_argument('--teacher_forcing_ratio',  required=False, type=valid_probability,   default=1, help='Teacher forcing ratio to use' )
+    parser.add_argument('--word_dropout', required=False, type=valid_probability, default=0.4, help='Word dropout probability in decoder teacher forcing path')
+    parser.add_argument('--caption_type', required=False, type=str, choices=['Transformer', 'Baseline', 'transformer', 'baseline'], default='Baseline', help='Caption model type')
 
     parser.add_argument('--first_stage',  required=False, type=str,  choices=["spotting", "caption"], default="spotting")
     parser.add_argument('--window_size_spotting', required=False, type=int,   default=15,     help='Size of the chunk (in seconds)' )
@@ -46,6 +49,11 @@ if __name__ == '__main__':
     parser.add_argument('--freeze_encoder',  required=False, action='store_true',  help='Perform testing only')
     parser.add_argument('--pretrain',   required=False, action='store_true',  help='Perform testing only' )
     parser.add_argument('--weights_encoder',  required=False, type=str, default=None)
+    parser.add_argument('--contrastive_weights_path', required=False, type=str, default=None, help='Path to contrastive encoder checkpoint to preload Transformer_Video')
+    parser.add_argument('--freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_true', help='Freeze Transformer_Video encoder after loading --contrastive_weights_path')
+    parser.add_argument('--no_freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_false', help='Do not freeze Transformer_Video encoder after loading --contrastive_weights_path')
+    parser.add_argument('--unfreeze_contrastive_projection', action='store_true', help='When --freeze_contrastive_encoder is set, keep encoder.pooling_layer.video_proj trainable')
+    parser.set_defaults(freeze_contrastive_encoder=False)
     parser.add_argument('--num_layers',  required=False, type=int, default=2)
     
 
@@ -55,6 +63,7 @@ if __name__ == '__main__':
     parser.add_argument('--patience', required=False, type=int,   default=10,     help='Patience before reducing LR (ReduceLROnPlateau)' )
 
     parser.add_argument('--GPU',        required=False, type=int,   default=-1,     help='ID of the GPU to use' )
+    parser.add_argument('--device',     required=False, type=str,   default=None,   help='torch device (e.g., cpu, cuda, cuda:0)' )
     parser.add_argument('--max_num_worker',   required=False, type=int,   default=4, help='number of worker to load data')
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
 
@@ -93,6 +102,8 @@ if __name__ == '__main__':
     if args.GPU >= 0:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+    if args.device is None:
+        args.device = "cuda" if args.GPU >= 0 and torch.cuda.is_available() else "cpu"
 
 
     start=time.time()

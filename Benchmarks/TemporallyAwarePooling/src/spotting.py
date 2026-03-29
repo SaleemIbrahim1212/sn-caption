@@ -14,27 +14,42 @@ from loss import NLLLoss
 
 import wandb
 
+def resolve_device(args):
+    if getattr(args, "device", None) is not None:
+        return torch.device(args.device)
+    if getattr(args, "GPU", -1) >= 0 and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
 def main(args):
+    device = resolve_device(args)
 
     logging.info("Parameters:")
     for arg in vars(args):
         logging.info(arg.rjust(15) + " : " + str(getattr(args, arg)))
 
+    # Support both CLI (`--window_size`) and main.py (`--window_size_spotting`)
+    window_size = getattr(args, "window_size", None)
+    if window_size is None:
+        window_size = getattr(args, "window_size_spotting", None)
+    if window_size is None:
+        raise AttributeError("window_size not set. Use --window_size or --window_size_spotting.")
+
     # create dataset
     if not args.test_only:
-        dataset_Train = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
-        dataset_Valid = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
-        dataset_Valid_metric  = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
-    dataset_Test  = SoccerNetClipsTesting(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
+        dataset_Train = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=window_size)
+        dataset_Valid = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=window_size)
+        dataset_Valid_metric  = SoccerNetClips(path=args.SoccerNet_path, features=args.features, split=args.split_valid, version=args.version, framerate=args.framerate, window_size=window_size)
+    dataset_Test  = SoccerNetClipsTesting(path=args.SoccerNet_path, features=args.features, split=args.split_test, version=args.version, framerate=args.framerate, window_size=window_size)
 
     if args.feature_dim is None:
         args.feature_dim = dataset_Test[0][1].shape[-1]
         print("feature_dim found:", args.feature_dim)
     # create model
     model = Video2Spot(weights=args.load_weights, input_size=args.feature_dim,
-                  num_classes=dataset_Test.num_classes, window_size=args.window_size_spotting, 
+                  num_classes=dataset_Test.num_classes, window_size=window_size, 
                   vlad_k=args.vlad_k,
-                  framerate=args.framerate, pool=args.pool, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).cuda()
+                  framerate=args.framerate, pool=args.pool, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -73,18 +88,20 @@ def main(args):
                 max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency)
 
     # For the best model only
-    checkpoint = torch.load(os.path.join("models", args.model_name, "spotting", "model.pth.tar"))
+    checkpoint = torch.load(os.path.join("models", args.model_name, "spotting", "model.pth.tar"), map_location=device)
     model.load_state_dict(checkpoint['state_dict'])
 
     # test on multiple splits [test/challenge]
     for split in args.split_test:
-        dataset_Test  = SoccerNetClipsTesting(path=args.SoccerNet_path, features=args.features, split=[split], version=args.version, framerate=args.framerate, window_size=args.window_size_spotting)
+        dataset_Test  = SoccerNetClipsTesting(path=args.SoccerNet_path, features=args.features, split=[split], version=args.version, framerate=args.framerate, window_size=window_size)
 
         test_loader = torch.utils.data.DataLoader(dataset_Test,
             batch_size=1, shuffle=False,
             num_workers=1, pin_memory=True)
-
-        results = test_spotting(test_loader, model=model, model_name=args.model_name, NMS_window=args.NMS_window, NMS_threshold=args.NMS_threshold)
+        try: 
+            results = test_spotting(test_loader, model=model, model_name=args.model_name, NMS_window=args.NMS_window, NMS_threshold=args.NMS_threshold)
+        except: 
+            continue 
         if results is None:
             continue
 
@@ -126,6 +143,8 @@ if __name__ == '__main__':
     parser.add_argument('--vlad_k',       required=False, type=int,   default=64, help='Size of the vocabulary for NetVLAD' )
     parser.add_argument('--NMS_window',       required=False, type=int,   default=30, help='NMS window in second' )
     parser.add_argument('--NMS_threshold',       required=False, type=float,   default=0.0, help='NMS threshold for positive results' )
+    parser.add_argument('--freeze_encoder',  required=False, action='store_true', help='Freeze encoder weights')
+    parser.add_argument('--weights_encoder', required=False, type=str, default=None, help='Path to pretrained encoder weights')
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )
     parser.add_argument('--LR',       required=False, type=float,   default=1e-03, help='Learning Rate' )
@@ -133,6 +152,7 @@ if __name__ == '__main__':
     parser.add_argument('--patience', required=False, type=int,   default=10,     help='Patience before reducing LR (ReduceLROnPlateau)' )
 
     parser.add_argument('--GPU',        required=False, type=int,   default=-1,     help='ID of the GPU to use' )
+    parser.add_argument('--device',     required=False, type=str,   default=None,   help='torch device (e.g., cpu, cuda, cuda:0)' )
     parser.add_argument('--max_num_worker',   required=False, type=int,   default=4, help='number of worker to load data')
     parser.add_argument('--seed',   required=False, type=int,   default=0, help='seed for reproducibility')
 
@@ -172,6 +192,8 @@ if __name__ == '__main__':
     if args.GPU >= 0:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
+    if args.device is None:
+        args.device = "cuda" if args.GPU >= 0 and torch.cuda.is_available() else "cpu"
 
 
     start=time.time()
