@@ -263,10 +263,10 @@ class MultimodalTransformerCaption(nn.Module):
             return cls_audio_token, encoder_out
 
         elif (video_feats is not None  and audio_feats is not None):
-            '''if we have both features'''
-            cls_audio_token, cls_video_token = self.pooling_layer(audio_feats, video_feats )
-            final_token  = torch.concat([cls_audio_token, cls_video_token], dim=1)
-            return final_token
+            '''if we have both features — pooled init + full concat sequence for decoder attention'''
+            cls_audio_token, cls_video_token, encoder_seq = self.pooling_layer(audio_feats, video_feats)
+            final_token = torch.concat([cls_audio_token, cls_video_token], dim=1)
+            return final_token, encoder_seq
         
         
         
@@ -470,10 +470,6 @@ class SoccerNetTransformerCaption(nn.Module):
             audio_feat_dim=audio_input_size,
         )
         self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers, word_dropout=word_dropout)
-        # DecoderRNN attention uses a fixed 512-d context (see DecoderRNN.forward); fusion concat is 1024-d.
-        self.fusion_ctx_proj = (
-            nn.Linear(self.encoder.hidden_size, 512) if pool == "Transformer" else None
-        )
         #self.load_weights(weights=weights)
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
         self.vocab_size = vocab_size
@@ -501,9 +497,8 @@ class SoccerNetTransformerCaption(nn.Module):
             '''get the cls token just for the audio'''
             features, encoder_out = self.encoder(audio_feats=features_audio)
         else:
-            '''get the cls token for the combined versions'''
-            features = self.encoder(audio_feats=features_audio, video_feats=features_video)
-            encoder_out = self.fusion_ctx_proj(features.unsqueeze(1))
+            '''get pooled fusion + time-concatenated AV encoder states for attention'''
+            features, encoder_out = self.encoder(audio_feats=features_audio, video_feats=features_video)
         batch_size = captions.size(0)
         captions = captions[:, :-1]  # Remove last word in caption to use as input
         decoder_lengths = [max(int(length) - 1, 1) for length in lengths]
@@ -543,8 +538,9 @@ class SoccerNetTransformerCaption(nn.Module):
         elif (self.encoder.pool == "Transformer_Audio"):
             features, encoder_output = self.encoder(audio_feats=features_audio.unsqueeze(0))
         else:
-            features = self.encoder(audio_feats=features_audio.unsqueeze(0), video_feats=features_video.unsqueeze(0))
-            encoder_output = self.fusion_ctx_proj(features.unsqueeze(1))
+            features, encoder_output = self.encoder(
+                audio_feats=features_audio.unsqueeze(0), video_feats=features_video.unsqueeze(0)
+            )
 
         return self.decoder.sample(features, encoder_output, max_seq_length)
  
