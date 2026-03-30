@@ -57,7 +57,7 @@ def trainer(phase, train_loader,
             criterion,
             model_name,
             max_epochs=1000,
-            evaluation_frequency=20,
+            evaluation_frequency=10,
             log_every_n_batches=50,
             grad_clip_norm=1.0):
 

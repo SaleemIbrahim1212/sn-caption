@@ -357,7 +357,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--version', required=False, type=int,   default=2,     help='Version of the dataset' )
     parser.add_argument('--feature_dim', required=False, type=int,   default=None,     help='Number of input features' )
-    parser.add_argument('--evaluation_frequency', required=False, type=int,   default=1,     help='Number of chunks per epoch' )
+    parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,    help='Run CIDEr/METEOR validation every N epochs (epoch 0 skipped)' )
     parser.add_argument('--log_every_n_batches', required=False, type=int, default=20, help='Log caption batch stats every N batches (<=0 disables)' )
     parser.add_argument('--framerate', required=False, type=int,   default=1,     help='Framerate of the input features' )
     parser.add_argument('--window_size_caption', required=False, type=int,   default=45,     help='Size of the chunk (in seconds)' )

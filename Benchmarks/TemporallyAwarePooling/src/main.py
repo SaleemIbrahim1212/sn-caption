@@ -31,7 +31,7 @@ if __name__ == '__main__':
 
     parser.add_argument('--version', required=False, type=int,   default=2,     help='Version of the dataset' )
     parser.add_argument('--feature_dim', required=False, type=int,   default=None,     help='Number of input features' )
-    parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Number of chunks per epoch' )
+    parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Run full validation metrics every N epochs (epoch 0 skipped)' )
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )
     parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool for spotting and non-transformer captioning' )
     parser.add_argument('--transformer_modality', required=False, type=str, choices=["video", "audio", "both"], default="video", help='Transformer modality to run when --caption_type=Transformer' )
