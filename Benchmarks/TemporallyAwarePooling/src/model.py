@@ -415,7 +415,7 @@ class DecoderRNN(nn.Module):
             inputs = torch.cat([word, final_context_vector], dim=1)
             hiddens, states = self.lstm(inputs.unsqueeze(1), states)
             logit = self.fc(hiddens.squeeze(1))
-            predicted = top_p_sample(logit, p=0.9, temperature=1.0)
+            predicted = logit.argmax(1)
             sampled_ids.append(predicted)
             if predicted.item() == EOS_TOKEN:
                 break
