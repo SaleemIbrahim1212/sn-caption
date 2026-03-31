@@ -122,6 +122,9 @@ def main(args):
                   contrastive_weights_path=args.contrastive_weights_path,
                   freeze_contrastive_encoder=args.freeze_contrastive_encoder,
                   unfreeze_contrastive_projection=args.unfreeze_contrastive_projection,
+                  contrastive_audio_weights_path=getattr(args, "contrastive_audio_weights_path", None),
+                  freeze_contrastive_audio_encoder=getattr(args, "freeze_contrastive_audio_encoder", True),
+                  unfreeze_contrastive_audio_projection=getattr(args, "unfreeze_contrastive_audio_projection", False),
                   audio_input_size=getattr(args, "audio_feature_dim", None)).to(device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
@@ -267,6 +270,9 @@ def dvc(args):
                   contrastive_weights_path=args.contrastive_weights_path,
                   freeze_contrastive_encoder=args.freeze_contrastive_encoder,
                   unfreeze_contrastive_projection=args.unfreeze_contrastive_projection,
+                  contrastive_audio_weights_path=getattr(args, "contrastive_audio_weights_path", None),
+                  freeze_contrastive_audio_encoder=getattr(args, "freeze_contrastive_audio_encoder", True),
+                  unfreeze_contrastive_audio_projection=getattr(args, "unfreeze_contrastive_audio_projection", False),
                   audio_input_size=getattr(args, "audio_feature_dim", None)).to(device)
     else: 
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
@@ -376,8 +382,14 @@ if __name__ == '__main__':
     parser.add_argument('--freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_true', help='Freeze Transformer_Video encoder after loading --contrastive_weights_path')
     parser.add_argument('--no_freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_false', help='Do not freeze Transformer_Video encoder after loading --contrastive_weights_path')
     parser.add_argument('--unfreeze_contrastive_projection', action='store_true', help='When --freeze_contrastive_encoder is set, keep encoder.pooling_layer.video_proj trainable')
+    parser.add_argument('--contrastive_audio_weights_path', required=False, type=str, default=None, help='Path to contrastive encoder checkpoint to preload Transformer_Audio')
+    parser.add_argument('--freeze_contrastive_audio_encoder', dest='freeze_contrastive_audio_encoder', action='store_true', help='Freeze Transformer_Audio encoder after loading --contrastive_audio_weights_path')
+    parser.add_argument('--no_freeze_contrastive_audio_encoder', dest='freeze_contrastive_audio_encoder', action='store_false', help='Do not freeze Transformer_Audio encoder after loading --contrastive_audio_weights_path')
+    parser.add_argument('--unfreeze_contrastive_audio_projection', action='store_true', help='When --freeze_contrastive_audio_encoder is set, keep encoder.pooling_layer.audio_proj trainable')
     parser.set_defaults(freeze_contrastive_encoder=True)
     parser.set_defaults(unfreeze_contrastive_projection=True)
+    parser.set_defaults(freeze_contrastive_audio_encoder=True)
+    parser.set_defaults(unfreeze_contrastive_audio_projection=False)
     parser.add_argument('--first_stage',  required=False, type=str,  choices=["spotting", "caption"], default="spotting")
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )

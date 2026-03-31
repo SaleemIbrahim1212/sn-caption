@@ -85,6 +85,68 @@ def load_contrastive_video_weights(
                 param.requires_grad = True
 
 
+def load_contrastive_audio_weights(
+    pooling_layer,
+    contrastive_audio_weights_path,
+    freeze_contrastive_audio_encoder,
+    unfreeze_contrastive_audio_projection,
+    multimodal_fusion=False,
+):
+    """Load audio contrastive weights into audio_proj / embedding_audio / audio_transformer."""
+    if not contrastive_audio_weights_path:
+        return
+    if not os.path.exists(contrastive_audio_weights_path):
+        logging.warning("Could not find audio contrastive checkpoint at %s; skipping preload.", contrastive_audio_weights_path)
+        return
+
+    logging.info("Loading contrastive audio weights from %s", contrastive_audio_weights_path)
+    checkpoint = torch.load(contrastive_audio_weights_path, map_location=torch.device("cpu"))
+    state_dict = checkpoint["model_video"] if isinstance(checkpoint, dict) and "model_video" in checkpoint else checkpoint
+
+    target_sd = pooling_layer.state_dict()
+    compatible = {}
+    for k, v in state_dict.items():
+        if k not in target_sd:
+            continue
+        if target_sd[k].shape != v.shape:
+            logging.warning(
+                "Skipping audio contrastive key %s: checkpoint shape %s vs model %s",
+                k,
+                tuple(v.shape),
+                tuple(target_sd[k].shape),
+            )
+            continue
+        compatible[k] = v
+
+    missing, unexpected = pooling_layer.load_state_dict(compatible, strict=False)
+    if compatible:
+        logging.info(
+            "Audio contrastive load: merged %d tensors (strict=False; missing keys are expected for non-audio branches).",
+            len(compatible),
+        )
+    else:
+        logging.warning("No audio contrastive tensors matched the audio branch; check architecture and input dims.")
+
+    if not freeze_contrastive_audio_encoder:
+        return
+
+    if multimodal_fusion:
+        for name, param in pooling_layer.named_parameters():
+            if name.startswith("audio_"):
+                param.requires_grad = False
+        if unfreeze_contrastive_audio_projection and hasattr(pooling_layer, "audio_transformer"):
+            logging.info("Unfreezing last audio transformer encoder block (fusion model).")
+            for param in pooling_layer.audio_transformer.layers[-1].parameters():
+                param.requires_grad = True
+    else:
+        for param in pooling_layer.parameters():
+            param.requires_grad = False
+        if unfreeze_contrastive_audio_projection and hasattr(pooling_layer, "audio_transformer"):
+            logging.info("Unfreezing last audio transformer encoder block.")
+            for param in pooling_layer.audio_transformer.layers[-1].parameters():
+                param.requires_grad = True
+
+
 class VideoEncoder(nn.Module):
     def __init__(self, input_size=512, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD"):
         """
@@ -189,7 +251,7 @@ class VideoEncoder(nn.Module):
         return inputs_pooled
 
 class MultimodalTransformerCaption(nn.Module):
-    def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, audio_feat_dim=None):
+    def __init__(self, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, audio_feat_dim=None, contrastive_audio_weights_path=None, freeze_contrastive_audio_encoder=True, unfreeze_contrastive_audio_projection=False):
         '''
         Same as the video encoder but we have audio and a transformer now
         Using the same recepie as above but tweaking to incorporate audio as well
@@ -226,6 +288,13 @@ class MultimodalTransformerCaption(nn.Module):
                 audio_num_layers=2,
                 audio_length=self.window_size_frame,
             )
+            load_contrastive_audio_weights(
+                self.pooling_layer,
+                contrastive_audio_weights_path,
+                freeze_contrastive_audio_encoder,
+                unfreeze_contrastive_audio_projection,
+                multimodal_fusion=False,
+            )
             self.hidden_size = 512
 
         elif self.pool == "Transformer":
@@ -246,6 +315,13 @@ class MultimodalTransformerCaption(nn.Module):
                 contrastive_weights_path,
                 freeze_contrastive_encoder,
                 unfreeze_contrastive_projection,
+                multimodal_fusion=True,
+            )
+            load_contrastive_audio_weights(
+                self.pooling_layer,
+                contrastive_audio_weights_path,
+                freeze_contrastive_audio_encoder,
+                unfreeze_contrastive_audio_projection,
                 multimodal_fusion=True,
             )
             self.hidden_size = 1024
@@ -458,7 +534,7 @@ class SoccerNetTransformerCaption(nn.Module):
         Use ``sample()`` to autoregressively generate a caption given raw video/audio
         features.
     """
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.0, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4, audio_input_size=None):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.0, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4, audio_input_size=None, contrastive_audio_weights_path=None, freeze_contrastive_audio_encoder=True, unfreeze_contrastive_audio_projection=False):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(
             input_size=input_size,
@@ -469,6 +545,9 @@ class SoccerNetTransformerCaption(nn.Module):
             freeze_contrastive_encoder=freeze_contrastive_encoder,
             unfreeze_contrastive_projection=unfreeze_contrastive_projection,
             audio_feat_dim=audio_input_size,
+            contrastive_audio_weights_path=contrastive_audio_weights_path,
+            freeze_contrastive_audio_encoder=freeze_contrastive_audio_encoder,
+            unfreeze_contrastive_audio_projection=unfreeze_contrastive_audio_projection,
         )
         self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers, word_dropout=word_dropout)
         #self.load_weights(weights=weights)

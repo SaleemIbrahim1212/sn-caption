@@ -55,7 +55,7 @@ def trainer(train_loader,
     for epoch in range(max_epochs):
         loss_training = train("contrastive", train_loader, model_video=model_video, model_text=model_text,
                       optimizer=optimizer, epoch=epoch + 1,
-                      log_every_n_batches=log_every_n_batches, criterion=criterion)
+                      log_every_n_batches=log_every_n_batches, criterion=criterion, model_name=model_name)
 
         logging.info(f"Epoch {epoch+1}: train_loss={loss_training:.4f}")
 
@@ -63,7 +63,7 @@ def trainer(train_loader,
             scheduler.step(loss_training)
     return
 
-def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoch, log_every_n_batches=50):
+def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoch, model_name, log_every_n_batches=50):
     """Execute a single training epoch for contrastive video–text alignment.
     Iterates over all batches, computing the contrastive loss between video and text
     embeddings, back-propagating, and logging diagnostics (diagonal vs. off-diagonal
@@ -165,7 +165,7 @@ def train(phase, dataloader, model_video,model_text,  criterion, optimizer, epoc
                 'model_text': model_text.state_dict(),
                 'optimizer': optimizer.state_dict(),
                 'loss': loss,
-            }, os.path.join("models", "contrastive", "best.pth"))
+            }, os.path.join("models", model_name, "best.pth"))
 
     return losses.avg
 
@@ -208,6 +208,7 @@ class TextEncoder(nn.Module):
         return x 
 
 
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
@@ -215,22 +216,74 @@ if __name__ == "__main__":
     parser.add_argument("--features", type=str, default="ResNET_TF2_PCA512.npy")
     parser.add_argument("--split_train", nargs="+", default=["train"])
     parser.add_argument("--version", type=int, default=2)
-    parser.add_argument("--framerate", type=int, default=2)
+    parser.add_argument("--framerate", type=int, default=1)  # audio memmap is 1fps-aligned
     parser.add_argument("--window_size_caption", type=int, default=45)
     parser.add_argument("--mapping_json", type=str, required=True)
-    parser.add_argument("--feature_file", type=str, default=None)
+    parser.add_argument("--feature_file", type=str, required=True)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--max_num_worker", type=int, default=4)
+    parser.add_argument("--caption_modality", type=str, default="audio", choices=["video", "audio"])
+    parser.add_argument("--master_audio_dir", type=str, default=None)
+    parser.add_argument("--audio_feature_dim", type=int, default=128)
+    parser.add_argument("--model_name", type=str, default="contrastive")
     args = parser.parse_args()
-    dataset_Train = SoccerNetCaptions(path=args.SoccerNet_path, features=args.features, split=args.split_train, version=args.version, framerate=args.framerate, window_size=args.window_size_caption, mapping_json=args.mapping_json, feature_file=args.feature_file)
-    model_video = Transformer_Video(video_d_model=512, video_feat_dim=8576, video_nhead=8, video_num_layers=2, video_length=45).to('cuda')
 
+    if args.caption_modality == "audio" and not args.master_audio_dir:
+        raise ValueError("--master_audio_dir is required when --caption_modality=audio")
 
-    model_text = TextEncoder(vocab_size=1769, embed_dim=256, proj_dim=512).to('cuda')
+    dataset_Train = SoccerNetCaptions(
+        path=args.SoccerNet_path,
+        features=args.features,
+        split=args.split_train,
+        version=args.version,
+        framerate=args.framerate,
+        window_size=args.window_size_caption,
+        mapping_json=args.mapping_json,
+        feature_file=args.feature_file,
+        caption_modality=args.caption_modality,
+        master_audio_dir=args.master_audio_dir if args.caption_modality == "audio" else None,
+    )
+
+    train_loader = torch.utils.data.DataLoader(
+        dataset_Train,
+        batch_size=args.batch_size,
+        shuffle=True,
+        num_workers=args.max_num_worker,
+        pin_memory=True,
+        collate_fn=collate_fn_padd,
+        persistent_workers=(args.max_num_worker > 0),
+    )
+
+    if args.caption_modality == "audio":
+        model_encoder = Transformer_Audio(
+            audio_feat_dim=args.audio_feature_dim,
+            audio_d_model=512,
+            audio_nhead=8,
+            audio_num_layers=2,
+            audio_length=args.window_size_caption * args.framerate,
+        ).to("cuda")
+    else:
+        model_encoder = Transformer_Video(
+            video_d_model=512,
+            video_feat_dim=8576,  
+            video_nhead=8,
+            video_num_layers=2,
+            video_length=args.window_size_caption * args.framerate,
+        ).to("cuda")
+
+    model_text = TextEncoder(vocab_size=1769, embed_dim=256, proj_dim=512).to("cuda")
     loss = ContrastiveLoss()
-    optimizer = torch.optim.Adam(list(model_video.parameters()) + list(model_text.parameters()),lr=1e-4)
-    dataset_Train = torch.utils.data.DataLoader(dataset_Train,
-            batch_size=args.batch_size, shuffle=True,
-            num_workers=args.max_num_worker, pin_memory=True, collate_fn=collate_fn_padd, persistent_workers=(args.max_num_worker > 0) )
-    trainer(dataset_Train, model_video=model_video, model_text=model_text, criterion=loss, optimizer=optimizer , scheduler=None, model_name='contrastive' )
-    
+    optimizer = torch.optim.Adam(
+        list(model_encoder.parameters()) + list(model_text.parameters()),
+        lr=1e-4,
+    )
+
+    trainer(
+        train_loader,
+        model_video=model_encoder,   
+        model_text=model_text,
+        criterion=loss,
+        optimizer=optimizer,
+        scheduler=None,
+        model_name=args.model_name,
+    )
