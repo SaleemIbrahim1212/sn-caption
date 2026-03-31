@@ -30,6 +30,30 @@ python src/main.py --SoccerNet_path=path/to/SoccerNet/ --model_name=new_model --
 
 Replace `path/to/SoccerNet/` with a local path for the SoccerNet dataset. If you do not have a copy of SoccerNet, this code will automatically download SoccerNet.
 
+### Train Transformer captioning (audio + video, dual decoder)
+
+Use `src/captioning.py` with `--caption_type Transformer --transformer_modality both`.
+This runs the multimodal Transformer encoder and the dual LSTM decoder setup (audio decoder + video decoder).
+
+```bash
+/kaggle/working/venv/bin/python -u /kaggle/working/sn-caption/Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --master_audio_dir /kaggle/input/datasets/salmanassri/soccernet-audio-densefile-at-45-1fps \
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
+  --model_name Transformer-Audio-Video-Caption-dualdecoder \
+  --caption_type Transformer \
+  --transformer_modality both \
+  --GPU 0 \
+  --evaluation_frequency 10
+```
+
+Notes:
+- Do not pass `--load_weights` from an older single-decoder caption checkpoint.
+- Keep video and audio memmaps temporally aligned (matching `mapping.json` and `audio_mapping.json` half lengths).
+
 ## Inference
 
 ```bash
