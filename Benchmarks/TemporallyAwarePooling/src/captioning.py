@@ -408,7 +408,7 @@ if __name__ == '__main__':
                             datetime.now().strftime('%Y-%m-%d_%H-%M-%S.log'))
 
     run = wandb.init(
-    project="NetVLAD-caption",
+    project="LSTM-Exp",
     name=args.model_name
     )
 
