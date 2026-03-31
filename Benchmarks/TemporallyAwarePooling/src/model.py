@@ -346,6 +346,117 @@ class DecoderRNN(nn.Module):
 
         return torch.cat(sampled_ids)
 
+
+class DualModalDecoderRNN(nn.Module):
+    """Separate LSTM decoders for audio and video, each attending only to its encoder stream.
+
+    Pooled audio/video tokens initialize the respective LSTMs. Word embeddings are shared.
+    Per-step logits are produced by fusing the two LSTM hidden states with a linear layer.
+    """
+
+    def __init__(
+        self,
+        embed_size,
+        hidden_size,
+        vocab_size,
+        num_layers=2,
+        word_dropout=0.4,
+        context_dim=512,
+    ):
+        super().__init__()
+        self.context_dim = context_dim
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.word_dropout = word_dropout
+        self.embed = nn.Embedding(vocab_size, embed_size, padding_idx=0)
+        self.dropout = nn.Dropout(0.4)
+        self.activation = nn.ReLU()
+
+        def _init_mlp():
+            return nn.ModuleDict(
+                {
+                    "ft1": nn.Linear(context_dim, hidden_size),
+                    "ft2": nn.Linear(hidden_size, hidden_size),
+                }
+            )
+
+        self.audio_init = _init_mlp()
+        self.video_init = _init_mlp()
+        self.lstm_a = nn.LSTM(
+            embed_size + context_dim,
+            hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+        )
+        self.lstm_v = nn.LSTM(
+            embed_size + context_dim,
+            hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+        )
+        self.fc = nn.Linear(2 * hidden_size, vocab_size)
+
+    def _pooled_to_lstm_state(self, feat, which):
+        m = self.audio_init if which == "a" else self.video_init
+        x = m["ft2"](self.activation(self.dropout(m["ft1"](feat))))
+        x = torch.stack([x] * self.num_layers, dim=0)
+        return (x, x)
+
+    def initial_states(self, feat_a, feat_v):
+        return self._pooled_to_lstm_state(feat_a, "a"), self._pooled_to_lstm_state(feat_v, "v")
+
+    def _attn(self, query, encoder_out):
+        context = query @ encoder_out.permute(0, 2, 1) / (self.context_dim ** 0.5)
+        w = context.softmax(dim=2)
+        return (w @ encoder_out).squeeze(1)
+
+    def decode_step(self, word_embed, states_a, states_v, enc_a, enc_v):
+        qa = states_a[0][-1].unsqueeze(1)
+        qv = states_v[0][-1].unsqueeze(1)
+        ctx_a = self._attn(qa, enc_a)
+        ctx_v = self._attn(qv, enc_v)
+        in_a = torch.cat([word_embed, ctx_a], dim=1)
+        in_v = torch.cat([word_embed, ctx_v], dim=1)
+        ha, states_a = self.lstm_a(in_a.unsqueeze(1), states_a)
+        hv, states_v = self.lstm_v(in_v.unsqueeze(1), states_v)
+        logits = self.fc(torch.cat([ha.squeeze(1), hv.squeeze(1)], dim=1))
+        return states_a, states_v, logits
+
+    def forward(self, feat_a, feat_v, captions, lengths, enc_a, enc_v):
+        states_a, states_v = self.initial_states(feat_a, feat_v)
+
+        captions_tokens = captions
+        captions = self.embed(captions_tokens)
+        if self.training and self.word_dropout > 0:
+            drop_mask = torch.rand(captions_tokens.shape, device=captions.device) < self.word_dropout
+            drop_mask = drop_mask & (captions_tokens != 0) & (captions_tokens != SOS_TOKEN)
+            captions = captions.masked_fill(drop_mask.unsqueeze(-1), 0.0)
+
+        _, L, _ = captions.shape
+        logits = []
+        for i in range(L):
+            word = captions[:, i, :]
+            states_a, states_v, logit = self.decode_step(word, states_a, states_v, enc_a, enc_v)
+            logits.append(logit)
+        outputs = torch.stack(logits, dim=1)
+        return pack_padded_sequence(outputs, lengths, batch_first=True, enforce_sorted=False)[0]
+
+    def sample(self, feat_a, feat_v, enc_a, enc_v, max_seq_length=50):
+        sampled_ids = []
+        states_a, states_v = self.initial_states(feat_a, feat_v)
+        word = self.embed(torch.tensor([[SOS_TOKEN]], device=feat_a.device)).squeeze(1)
+
+        for _ in range(max_seq_length):
+            states_a, states_v, logit = self.decode_step(word, states_a, states_v, enc_a, enc_v)
+            predicted = logit.argmax(1)
+            sampled_ids.append(predicted)
+            if predicted.item() == EOS_TOKEN:
+                break
+            word = self.embed(predicted)
+
+        return torch.cat(sampled_ids)
+
+
 class Video2Caption(nn.Module):
     def __init__(self, vocab_size, weights=None, input_size=512, vlad_k=64, window_size=15, framerate=2, pool="NetVLAD", embed_size=256, hidden_size=512, teacher_forcing_ratio=1, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, word_dropout=0.4):
         super(Video2Caption, self).__init__()
@@ -456,6 +567,10 @@ class SoccerNetTransformerCaption(nn.Module):
     Inference:
         Use ``sample()`` to autoregressively generate a caption given raw video/audio
         features.
+
+    When ``pool=="Transformer"`` (audio + video), the caption decoder uses
+    :class:`DualModalDecoderRNN`: two LSTMs with modality-specific attention,
+    fused logits via a linear layer on the concatenated hidden states.
     """
     def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.0, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4, audio_input_size=None):
         super(SoccerNetTransformerCaption, self).__init__()
@@ -469,7 +584,17 @@ class SoccerNetTransformerCaption(nn.Module):
             unfreeze_contrastive_projection=unfreeze_contrastive_projection,
             audio_feat_dim=audio_input_size,
         )
-        self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers, word_dropout=word_dropout)
+        self.use_dual_decoder = pool == "Transformer"
+        if self.use_dual_decoder:
+            self.decoder = DualModalDecoderRNN(
+                embed_size,
+                hidden_size,
+                vocab_size,
+                num_layers,
+                word_dropout=word_dropout,
+            )
+        else:
+            self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers, word_dropout=word_dropout)
         #self.load_weights(weights=weights)
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
         self.vocab_size = vocab_size
@@ -506,30 +631,54 @@ class SoccerNetTransformerCaption(nn.Module):
         if self.training and self.teacher_forcing_decay > 0:
             self.teacher_forcing_ratio = max(self.teacher_forcing_min, self.teacher_forcing_ratio - self.teacher_forcing_decay)
         if use_teacher_forcing:
-            # Teacher forcing: Feed the target as the next input
             decoder_input = captions
-            decoder_output = self.decoder(features, decoder_input, decoder_lengths, encoder_out)
+            if self.use_dual_decoder:
+                half_d = features.size(-1) // 2
+                feat_a, feat_v = features[:, :half_d], features[:, half_d:]
+                tm = encoder_out.size(1) // 2
+                enc_a, enc_v = encoder_out[:, :tm], encoder_out[:, tm:]
+                decoder_output = self.decoder(feat_a, feat_v, decoder_input, decoder_lengths, enc_a, enc_v)
+            else:
+                decoder_output = self.decoder(features, decoder_input, decoder_lengths, encoder_out)
         else:
-            #Copying what sample did here
-            features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
-            features_extracted = torch.stack([features_extracted] * self.decoder.num_layers)
-            states = (features_extracted, features_extracted) # to my understanding this keeps track of the words generated already 
-            decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
-            decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
-            for t in range(0, captions.size(1)):
-                word = self.decoder.embed(decoder_input).squeeze(1)
-                query = states[0][-1].unsqueeze(1)
-                context = query @ encoder_out.permute(0, 2, 1) / (512 ** 0.5)
-                logs = context.softmax(dim=2)
-                final_context_vector = (logs @ encoder_out).squeeze(1)
-                inputs = torch.cat([word, final_context_vector], dim=1)
-                hiddens, states = self.decoder.lstm(inputs.unsqueeze(1), states)
-                outputs = self.decoder.fc(hiddens.squeeze(1))
-                #decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
-                _, predicted = outputs.max(1)
-                decoder_input = predicted.unsqueeze(1)
-                decoder_output[:, t, :] = outputs  
-            decoder_output = pack_padded_sequence(decoder_output, decoder_lengths, batch_first=True, enforce_sorted=False)[0]
+            if self.use_dual_decoder:
+                half_d = features.size(-1) // 2
+                feat_a, feat_v = features[:, :half_d], features[:, half_d:]
+                tm = encoder_out.size(1) // 2
+                enc_a, enc_v = encoder_out[:, :tm], encoder_out[:, tm:]
+                states_a, states_v = self.decoder.initial_states(feat_a, feat_v)
+                decoder_input = captions[:, 0].unsqueeze(1)
+                decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
+                for t in range(0, captions.size(1)):
+                    word = self.decoder.embed(decoder_input).squeeze(1)
+                    states_a, states_v, outputs = self.decoder.decode_step(
+                        word, states_a, states_v, enc_a, enc_v
+                    )
+                    _, predicted = outputs.max(1)
+                    decoder_input = predicted.unsqueeze(1)
+                    decoder_output[:, t, :] = outputs
+                decoder_output = pack_padded_sequence(
+                    decoder_output, decoder_lengths, batch_first=True, enforce_sorted=False
+                )[0]
+            else:
+                features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
+                features_extracted = torch.stack([features_extracted] * self.decoder.num_layers)
+                states = (features_extracted, features_extracted)
+                decoder_input = captions[:, 0].unsqueeze(1)
+                decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
+                for t in range(0, captions.size(1)):
+                    word = self.decoder.embed(decoder_input).squeeze(1)
+                    query = states[0][-1].unsqueeze(1)
+                    context = query @ encoder_out.permute(0, 2, 1) / (512 ** 0.5)
+                    logs = context.softmax(dim=2)
+                    final_context_vector = (logs @ encoder_out).squeeze(1)
+                    inputs = torch.cat([word, final_context_vector], dim=1)
+                    hiddens, states = self.decoder.lstm(inputs.unsqueeze(1), states)
+                    outputs = self.decoder.fc(hiddens.squeeze(1))
+                    _, predicted = outputs.max(1)
+                    decoder_input = predicted.unsqueeze(1)
+                    decoder_output[:, t, :] = outputs
+                decoder_output = pack_padded_sequence(decoder_output, decoder_lengths, batch_first=True, enforce_sorted=False)[0]
         return decoder_output
     
     def sample(self, features_video, features_audio, max_seq_length=70):
@@ -542,6 +691,12 @@ class SoccerNetTransformerCaption(nn.Module):
                 audio_feats=features_audio.unsqueeze(0), video_feats=features_video.unsqueeze(0)
             )
 
+        if self.use_dual_decoder:
+            half_d = features.size(-1) // 2
+            feat_a, feat_v = features[:, :half_d], features[:, half_d:]
+            tm = encoder_output.size(1) // 2
+            enc_a, enc_v = encoder_output[:, :tm], encoder_output[:, tm:]
+            return self.decoder.sample(feat_a, feat_v, enc_a, enc_v, max_seq_length)
         return self.decoder.sample(features, encoder_output, max_seq_length)
  
 
