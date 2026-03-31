@@ -26,7 +26,7 @@ def top_p_sample(logits, p=0.9, temperature=1.0):
     probs = torch.softmax(sorted_logits, dim=-1)
     token = torch.multinomial(probs, 1)
     
-    return sorted_indices.gather(-1, token)
+    return sorted_indices.gather(-1, token).squeeze(-1)
 
 def top_k_sample(logits, k =  10, temperature = 1.0): 
     k = max(1, min(k, logits.size(-1)))
