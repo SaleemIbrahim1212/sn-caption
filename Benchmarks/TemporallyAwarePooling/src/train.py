@@ -504,7 +504,8 @@ def validate_captioning(dataloader, model, model_name):
             elif hasattr(model, "encoder") and pool.startswith("Transformer_Audio"):
                 output = [dataloader.dataset.detokenize(list(model.sample(None, feats_a[idx]).detach().cpu())) for idx in range(feats_a.shape[0])]
             elif hasattr(model, "encoder") and pool == "Transformer":
-                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx], feats_a[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
+                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx], feats_a[idx], decode_method="beam", beam_size=3, length_penalty=0.6).detach().cpu())) for idx in range(feats_v.shape[0])]
+
             else:
                 output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
             
@@ -561,7 +562,7 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
             elif hasattr(model, "encoder") and pool.startswith("Transformer_Audio"):
                 output = [dataloader.dataset.detokenize(list(model.sample(None, feats_a[idx]).detach().cpu())) for idx in range(feats_a.shape[0])]
             elif hasattr(model, "encoder") and pool == "Transformer":
-                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx], feats_a[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
+                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx], feats_a[idx], decode_method="beam", beam_size=3, length_penalty=0.6).detach().cpu())) for idx in range(feats_v.shape[0])]
             else:
                 output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
             
