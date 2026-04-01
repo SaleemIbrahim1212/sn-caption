@@ -355,7 +355,7 @@ class TransformerDecoder(nn.Module):
     def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=2, max_seq_length=50, word_dropout=0.4):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, d_model, padding_idx=0)
-        self.pos_embed = nn.Embedding(max_seq_length + 2, d_model)
+        self.pos_embed = nn.Embedding(512, d_model)  # fixed large size, safe for any caption length
         decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward=2048, dropout=0.1, batch_first=True)
         self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
         self.fc = nn.Linear(d_model, vocab_size)
@@ -528,7 +528,6 @@ class Video2Caption(nn.Module):
         use_teacher_forcing = random.random() < self.teacher_forcing_ratio
         if use_teacher_forcing:
             # Teacher forcing: Feed the target as the next input
-            
             decoder_input = captions
             decoder_output = self.decoder(features, decoder_input, decoder_lengths, features.unsqueeze(1))
         else:
