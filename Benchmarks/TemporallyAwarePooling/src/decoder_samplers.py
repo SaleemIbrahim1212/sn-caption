@@ -37,6 +37,45 @@ def top_k_sample(logits, k =  10, temperature = 1.0):
     sampled = topk_idx.gather(1, sampled_local).squeeze(1)  
     return sampled
 
+
+@torch.no_grad()
+def beam_search_decode(step_fn, start_token, eos_token, device, beam_size=3, max_seq_length=50, length_penalty=0.6):
+
+    beams = [{"tokens": [], "score": 0.0, "state": None, "done": False}]
+
+    for i in range(max_seq_length):
+        candidates = []
+        for beam in beams:
+            if beam["done"]:
+                candidates.append(beam)
+                continue
+
+            prev = torch.tensor([start_token if len(beam["tokens"]) == 0 else beam["tokens"][-1]], dtype=torch.long, device=device)
+            logits, next_state = step_fn(prev, beam["state"])
+            log_probs = F.log_softmax(logits.squeeze(0), dim=-1)
+            top_logp, top_idx = torch.topk(log_probs, k=min(beam_size, log_probs.numel()))
+
+            for j in range(top_idx.numel()):
+                tok = int(top_idx[j].item())
+                candidates.append({
+                    "tokens": beam["tokens"] + [tok],
+                    "score": beam["score"] + float(top_logp[j].item()),
+                    "state": next_state,
+                    "done": (tok == eos_token),
+                })
+
+        def rank_fn(b):
+            L = max(len(b["tokens"]), 1)
+            return b["score"] / (L ** length_penalty)
+
+        candidates.sort(key=rank_fn, reverse=True)
+        beams = candidates[:beam_size]
+        if all(b["done"] for b in beams):
+            break
+
+    best = max(beams, key=lambda b: b["score"] / (max(len(b["tokens"]), 1) ** length_penalty))
+    return torch.tensor(best["tokens"], dtype=torch.long, device=device)
+
 '''
-TODO : Beam Search , sampling with repetetion penalty
+TODO : sampling with repetetion penalty
 '''

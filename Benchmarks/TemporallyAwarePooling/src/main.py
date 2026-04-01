@@ -57,6 +57,8 @@ if __name__ == '__main__':
     parser.add_argument('--freeze_contrastive_audio_encoder', dest='freeze_contrastive_audio_encoder', action='store_true', help='Freeze Transformer_Audio encoder after loading --contrastive_audio_weights_path')
     parser.add_argument('--no_freeze_contrastive_audio_encoder', dest='freeze_contrastive_audio_encoder', action='store_false', help='Do not freeze Transformer_Audio encoder after loading --contrastive_audio_weights_path')
     parser.add_argument('--unfreeze_contrastive_audio_projection', action='store_true', help='When --freeze_contrastive_audio_encoder is set, keep encoder.pooling_layer.audio_proj trainable')
+    parser.add_argument('--modality_dropout_audio', required=False, type=valid_probability, default=0.1, help='In Transformer both-mode training, probability to zero audio stream for a sample')
+    parser.add_argument('--modality_dropout_video', required=False, type=valid_probability, default=0.1, help='In Transformer both-mode training, probability to zero video stream for a sample')
     parser.set_defaults(freeze_contrastive_encoder=False)
     parser.set_defaults(freeze_contrastive_audio_encoder=False)
     parser.add_argument('--num_layers',  required=False, type=int, default=2)

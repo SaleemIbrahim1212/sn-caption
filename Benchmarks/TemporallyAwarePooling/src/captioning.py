@@ -125,6 +125,8 @@ def main(args):
                   contrastive_audio_weights_path=getattr(args, "contrastive_audio_weights_path", None),
                   freeze_contrastive_audio_encoder=getattr(args, "freeze_contrastive_audio_encoder", True),
                   unfreeze_contrastive_audio_projection=getattr(args, "unfreeze_contrastive_audio_projection", False),
+                  modality_dropout_audio=getattr(args, "modality_dropout_audio", 0.1),
+                  modality_dropout_video=getattr(args, "modality_dropout_video", 0.1),
                   audio_input_size=getattr(args, "audio_feature_dim", None)).to(device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
@@ -164,11 +166,9 @@ def main(args):
             named_params = [(name, param) for name, param in model.named_parameters() if param.requires_grad]
             layer0_names = (
                 "encoder.pooling_layer.video_transformer.layers.0.",
-                "encoder.pooling_layer.audio_transformer.layers.0.",
             )
             layer1_names = (
                 "encoder.pooling_layer.video_transformer.layers.1.",
-                "encoder.pooling_layer.audio_transformer.layers.1.",
             )
             encoder_layer0_params = [param for name, param in named_params if any(token in name for token in layer0_names)]
             encoder_layer1_params = [param for name, param in named_params if any(token in name for token in layer1_names)]
@@ -273,6 +273,8 @@ def dvc(args):
                   contrastive_audio_weights_path=getattr(args, "contrastive_audio_weights_path", None),
                   freeze_contrastive_audio_encoder=getattr(args, "freeze_contrastive_audio_encoder", True),
                   unfreeze_contrastive_audio_projection=getattr(args, "unfreeze_contrastive_audio_projection", False),
+                  modality_dropout_audio=getattr(args, "modality_dropout_audio", 0.1),
+                  modality_dropout_video=getattr(args, "modality_dropout_video", 0.1),
                   audio_input_size=getattr(args, "audio_feature_dim", None)).to(device)
     else: 
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
@@ -386,6 +388,8 @@ if __name__ == '__main__':
     parser.add_argument('--freeze_contrastive_audio_encoder', dest='freeze_contrastive_audio_encoder', action='store_true', help='Freeze Transformer_Audio encoder after loading --contrastive_audio_weights_path')
     parser.add_argument('--no_freeze_contrastive_audio_encoder', dest='freeze_contrastive_audio_encoder', action='store_false', help='Do not freeze Transformer_Audio encoder after loading --contrastive_audio_weights_path')
     parser.add_argument('--unfreeze_contrastive_audio_projection', action='store_true', help='When --freeze_contrastive_audio_encoder is set, keep encoder.pooling_layer.audio_proj trainable')
+    parser.add_argument('--modality_dropout_audio', required=False, type=valid_probability, default=0.1, help='In Transformer both-mode training, probability to zero audio stream for a sample')
+    parser.add_argument('--modality_dropout_video', required=False, type=valid_probability, default=0.1, help='In Transformer both-mode training, probability to zero video stream for a sample')
     parser.set_defaults(freeze_contrastive_encoder=True)
     parser.set_defaults(unfreeze_contrastive_projection=True)
     parser.set_defaults(freeze_contrastive_audio_encoder=True)

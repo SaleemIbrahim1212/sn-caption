@@ -9,7 +9,7 @@ import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from decoder_samplers import top_p_sample
+from decoder_samplers import beam_search_decode
 
 from netvlad import NetVLAD, NetRVLAD
 from transformer import Transformer_Audio, Transformer_Video, Transformer
@@ -399,14 +399,41 @@ class DecoderRNN(nn.Module):
             
 
     
-    def sample(self, features, encoder_outputs, max_seq_length=50):
+    def sample(self, features, encoder_outputs, max_seq_length=50, decode_method="greedy", beam_size=3, length_penalty=0.6):
         sampled_ids = []
         features = self.ft_extactor_2(self.activation(self.dropout(self.ft_extactor_1(features))))
         features = torch.stack([features] * self.num_layers)
-        states = (features, features)
+        init_states = (features, features)
 
+        if decode_method == "beam":
+            if encoder_outputs.size(0) != 1:
+                raise ValueError("Minimal beam search implementation currently supports batch_size=1 only.")
+
+            def _step(prev_token, state):
+                if state is None:
+                    state = init_states
+                word = self.embed(prev_token)
+                query = state[0][-1].unsqueeze(1)
+                context = query @ encoder_outputs.permute(0, 2, 1) / (512 ** 0.5)
+                logs = context.softmax(dim=2)
+                final_context_vector = (logs @ encoder_outputs).squeeze(1)
+                inputs = torch.cat([word, final_context_vector], dim=1)
+                hiddens, next_state = self.lstm(inputs.unsqueeze(1), state)
+                logits = self.fc(hiddens.squeeze(1))
+                return logits, next_state
+
+            return beam_search_decode(
+                step_fn=_step,
+                start_token=SOS_TOKEN,
+                eos_token=EOS_TOKEN,
+                device=features.device,
+                beam_size=beam_size,
+                max_seq_length=max_seq_length,
+                length_penalty=length_penalty,
+            )
+
+        states = init_states
         word = self.embed(torch.tensor([[SOS_TOKEN]], device=features.device)).squeeze(1)
-
         for _ in range(max_seq_length):
             query = states[0][-1].unsqueeze(1)
             context = query @ encoder_outputs.permute(0, 2, 1) / (512 ** 0.5)
@@ -420,7 +447,6 @@ class DecoderRNN(nn.Module):
             if predicted.item() == EOS_TOKEN:
                 break
             word = self.embed(predicted)
-
         return torch.cat(sampled_ids)
 
 class Video2Caption(nn.Module):
@@ -534,7 +560,7 @@ class SoccerNetTransformerCaption(nn.Module):
         Use ``sample()`` to autoregressively generate a caption given raw video/audio
         features.
     """
-    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.0, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4, audio_input_size=None, contrastive_audio_weights_path=None, freeze_contrastive_audio_encoder=True, unfreeze_contrastive_audio_projection=False):
+    def __init__(self, vocab_size, weights=None, input_size=512, window_size=15, framerate=2, pool="Transformer_Video", embed_size=256, hidden_size=512, teacher_forcing_ratio=1.0, teacher_forcing_decay=0.0, teacher_forcing_min=0.5, num_layers=2, max_seq_length=50, weights_encoder=None, freeze_encoder=False, contrastive_weights_path=None, freeze_contrastive_encoder=True, unfreeze_contrastive_projection=False, word_dropout=0.4, audio_input_size=None, contrastive_audio_weights_path=None, freeze_contrastive_audio_encoder=True, unfreeze_contrastive_audio_projection=False, modality_dropout_audio=0.1, modality_dropout_video=0.1):
         super(SoccerNetTransformerCaption, self).__init__()
         self.encoder = MultimodalTransformerCaption(
             input_size=input_size,
@@ -556,6 +582,9 @@ class SoccerNetTransformerCaption(nn.Module):
         self.teacher_forcing_ratio = teacher_forcing_ratio
         self.teacher_forcing_decay = teacher_forcing_decay
         self.teacher_forcing_min = teacher_forcing_min
+        # In multimodal mode, randomly zero one modality during training for robustness.
+        self.modality_dropout_audio = float(modality_dropout_audio)
+        self.modality_dropout_video = float(modality_dropout_video)
             
     def load_encoder(self, weights_encoder=None, freeze_encoder=False):
         if(weights_encoder is not None):
@@ -570,6 +599,20 @@ class SoccerNetTransformerCaption(nn.Module):
                     param.requires_grad = False
     
     def forward(self, features_video, features_audio, captions, lengths):
+        if (self.training and self.encoder.pool == "Transformer" and features_video is not None and features_audio is not None and (self.modality_dropout_audio > 0 or self.modality_dropout_video > 0)):
+            '''Trying stochastically dropping modality during training'''
+            p_a = max(0.0, min(1.0, self.modality_dropout_audio))
+            p_v = max(0.0, min(1.0, self.modality_dropout_video))
+            total = p_a + p_v
+            if total > 1.0:
+                p_a = p_a / total
+                p_v = p_v / total
+            u = torch.rand(features_video.size(0), device=features_video.device)
+            drop_audio = (u < p_a).view(-1, 1, 1)
+            drop_video = ((u >= p_a) & (u < (p_a + p_v))).view(-1, 1, 1)
+            features_audio = features_audio.masked_fill(drop_audio, 0.0)
+            features_video = features_video.masked_fill(drop_video, 0.0)
+
         if (self.encoder.pool == "Transformer_Video"):
             '''Get the cls token just for the video'''
             features, encoder_out = self.encoder(video_feats = features_video)
@@ -612,7 +655,7 @@ class SoccerNetTransformerCaption(nn.Module):
             decoder_output = pack_padded_sequence(decoder_output, decoder_lengths, batch_first=True, enforce_sorted=False)[0]
         return decoder_output
     
-    def sample(self, features_video, features_audio, max_seq_length=70):
+    def sample(self, features_video, features_audio, max_seq_length=70, decode_method="greedy", beam_size=3, length_penalty=0.6):
         if (self.encoder.pool == "Transformer_Video"):
             features, encoder_output = self.encoder(video_feats=features_video.unsqueeze(0))
         elif (self.encoder.pool == "Transformer_Audio"):
@@ -622,7 +665,14 @@ class SoccerNetTransformerCaption(nn.Module):
                 audio_feats=features_audio.unsqueeze(0), video_feats=features_video.unsqueeze(0)
             )
 
-        return self.decoder.sample(features, encoder_output, max_seq_length)
+        return self.decoder.sample(
+            features,
+            encoder_output,
+            max_seq_length=max_seq_length,
+            decode_method=decode_method,
+            beam_size=beam_size,
+            length_penalty=length_penalty,
+        )
  
 
 class Video2Spot(nn.Module):
