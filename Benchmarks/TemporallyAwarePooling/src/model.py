@@ -351,6 +351,49 @@ class MultimodalTransformerCaption(nn.Module):
         
 
 
+class TransformerDecoder(nn.Module):
+    def __init__(self, vocab_size, d_model=512, nhead=8, num_layers=2, max_seq_length=50, word_dropout=0.4):
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, d_model, padding_idx=0)
+        self.pos_embed = nn.Embedding(max_seq_length + 2, d_model)
+        decoder_layer = nn.TransformerDecoderLayer(d_model, nhead, dim_feedforward=2048, dropout=0.1, batch_first=True)
+        self.decoder = nn.TransformerDecoder(decoder_layer, num_layers=num_layers)
+        self.fc = nn.Linear(d_model, vocab_size)
+        self.word_dropout = word_dropout
+        self.max_seq_length = max_seq_length
+
+    def _causal_mask(self, sz, device):
+        return torch.triu(torch.ones(sz, sz, device=device), diagonal=1).bool()
+
+    def forward(self, memory, captions, lengths):
+        B, L = captions.shape
+        tgt = self.embed(captions)
+        if self.training and self.word_dropout > 0:
+            drop_mask = (torch.rand(captions.shape, device=captions.device) < self.word_dropout)
+            drop_mask = drop_mask & (captions != 0) & (captions != SOS_TOKEN)
+            tgt = tgt.masked_fill(drop_mask.unsqueeze(-1), 0.0)
+        pos = torch.arange(L, device=captions.device)
+        tgt = tgt + self.pos_embed(pos)
+        out = self.decoder(tgt, memory, tgt_mask=self._causal_mask(L, captions.device))
+        logits = self.fc(out)
+        return pack_padded_sequence(logits, lengths, batch_first=True, enforce_sorted=False)[0]
+
+    def sample(self, memory, max_seq_length=50):
+        device = memory.device
+        tokens = [SOS_TOKEN]
+        for _ in range(max_seq_length):
+            tgt = torch.tensor([tokens], dtype=torch.long, device=device)
+            tgt_emb = self.embed(tgt)
+            pos = torch.arange(len(tokens), device=device)
+            tgt_emb = tgt_emb + self.pos_embed(pos)
+            out = self.decoder(tgt_emb, memory, tgt_mask=self._causal_mask(len(tokens), device))
+            predicted = self.fc(out[:, -1, :]).argmax(dim=-1).item()
+            if predicted == EOS_TOKEN:
+                break
+            tokens.append(predicted)
+        return torch.tensor(tokens[1:], dtype=torch.long, device=device)
+
+
 class DecoderRNN(nn.Module):
     def __init__(self, input_size, embed_size, hidden_size, vocab_size, num_layers=2, word_dropout=0.4):
         super(DecoderRNN, self).__init__()
@@ -406,8 +449,6 @@ class DecoderRNN(nn.Module):
         init_states = (features, features)
 
         if decode_method == "beam":
-            if encoder_outputs.size(0) != 1:
-                raise ValueError("Minimal beam search implementation currently supports batch_size=1 only.")
 
             def _step(prev_token, state):
                 if state is None:
@@ -575,7 +616,7 @@ class SoccerNetTransformerCaption(nn.Module):
             freeze_contrastive_audio_encoder=freeze_contrastive_audio_encoder,
             unfreeze_contrastive_audio_projection=unfreeze_contrastive_audio_projection,
         )
-        self.decoder = DecoderRNN(self.encoder.hidden_size, embed_size , hidden_size, vocab_size, num_layers, word_dropout=word_dropout)
+        self.decoder = TransformerDecoder(vocab_size, d_model=hidden_size, nhead=8, num_layers=num_layers, max_seq_length=max_seq_length, word_dropout=word_dropout)
         #self.load_weights(weights=weights)
         self.load_encoder(weights_encoder=weights_encoder, freeze_encoder=freeze_encoder)
         self.vocab_size = vocab_size
@@ -622,57 +663,20 @@ class SoccerNetTransformerCaption(nn.Module):
         else:
             '''get pooled fusion + time-concatenated AV encoder states for attention'''
             features, encoder_out = self.encoder(audio_feats=features_audio, video_feats=features_video)
-        batch_size = captions.size(0)
-        captions = captions[:, :-1]  # Remove last word in caption to use as input
+        captions = captions[:, :-1]  # remove EOS, keep SOS..last_word as decoder input
         decoder_lengths = [max(int(length) - 1, 1) for length in lengths]
-        use_teacher_forcing = random.random() < self.teacher_forcing_ratio
-        if self.training and self.teacher_forcing_decay > 0:
-            self.teacher_forcing_ratio = max(self.teacher_forcing_min, self.teacher_forcing_ratio - self.teacher_forcing_decay)
-        if use_teacher_forcing:
-            # Teacher forcing: Feed the target as the next input
-            decoder_input = captions
-            decoder_output = self.decoder(features, decoder_input, decoder_lengths, encoder_out)
-        else:
-            #Copying what sample did here
-            features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
-            features_extracted = torch.stack([features_extracted] * self.decoder.num_layers)
-            states = (features_extracted, features_extracted) # to my understanding this keeps track of the words generated already 
-            decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
-            decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
-            for t in range(0, captions.size(1)):
-                word = self.decoder.embed(decoder_input).squeeze(1)
-                query = states[0][-1].unsqueeze(1)
-                context = query @ encoder_out.permute(0, 2, 1) / (512 ** 0.5)
-                logs = context.softmax(dim=2)
-                final_context_vector = (logs @ encoder_out).squeeze(1)
-                inputs = torch.cat([word, final_context_vector], dim=1)
-                hiddens, states = self.decoder.lstm(inputs.unsqueeze(1), states)
-                outputs = self.decoder.fc(hiddens.squeeze(1))
-                #decoder_output_t = self.decoder(features, decoder_input, torch.ones_like(lengths))
-                _, predicted = outputs.max(1)
-                decoder_input = predicted.unsqueeze(1)
-                decoder_output[:, t, :] = outputs  
-            decoder_output = pack_padded_sequence(decoder_output, decoder_lengths, batch_first=True, enforce_sorted=False)[0]
-        return decoder_output
+        return self.decoder(encoder_out, captions, decoder_lengths)
     
-    def sample(self, features_video, features_audio, max_seq_length=70, decode_method="greedy", beam_size=3, length_penalty=0.6):
-        if (self.encoder.pool == "Transformer_Video"):
-            features, encoder_output = self.encoder(video_feats=features_video.unsqueeze(0))
-        elif (self.encoder.pool == "Transformer_Audio"):
-            features, encoder_output = self.encoder(audio_feats=features_audio.unsqueeze(0))
+    def sample(self, features_video, features_audio, max_seq_length=70):
+        if self.encoder.pool == "Transformer_Video":
+            _, encoder_output = self.encoder(video_feats=features_video.unsqueeze(0))
+        elif self.encoder.pool == "Transformer_Audio":
+            _, encoder_output = self.encoder(audio_feats=features_audio.unsqueeze(0))
         else:
-            features, encoder_output = self.encoder(
+            _, encoder_output = self.encoder(
                 audio_feats=features_audio.unsqueeze(0), video_feats=features_video.unsqueeze(0)
             )
-
-        return self.decoder.sample(
-            features,
-            encoder_output,
-            max_seq_length=max_seq_length,
-            decode_method=decode_method,
-            beam_size=beam_size,
-            length_penalty=length_penalty,
-        )
+        return self.decoder.sample(encoder_output, max_seq_length=max_seq_length)
  
 
 class Video2Spot(nn.Module):
