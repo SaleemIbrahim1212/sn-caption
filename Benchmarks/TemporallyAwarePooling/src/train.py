@@ -96,7 +96,10 @@ def trainer(phase, train_loader,
         checkpoint = torch.load(resume_path, map_location=next(model.parameters()).device)
         _unwrap(model).load_state_dict(checkpoint['state_dict'])
         if 'optimizer' in checkpoint:
-            optimizer.load_state_dict(checkpoint['optimizer'])
+            try:
+                optimizer.load_state_dict(checkpoint['optimizer'])
+            except ValueError as e:
+                logging.warning(f"Skipping optimizer state (param groups changed): {e}")
         start_epoch = checkpoint.get('epoch', 0)
         best_loss = checkpoint.get('best_loss', best_loss)
         best_cider = checkpoint.get('best_cider', best_cider)
