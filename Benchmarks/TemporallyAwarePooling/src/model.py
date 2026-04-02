@@ -39,7 +39,7 @@ def load_contrastive_video_weights(
 
     logging.info("Loading contrastive video weights from %s", contrastive_weights_path)
     checkpoint = torch.load(contrastive_weights_path, map_location=torch.device("cpu"))
-    state_dict = checkpoint["model_video"] if isinstance(checkpoint, dict) and "model_video" in checkpoint else checkpoint
+    state_dict = (checkpoint.get("model_video") or checkpoint.get("online_encoder") or checkpoint) if isinstance(checkpoint, dict) else checkpoint
 
     target_sd = pooling_layer.state_dict()
     compatible = {}
@@ -101,7 +101,7 @@ def load_contrastive_audio_weights(
 
     logging.info("Loading contrastive audio weights from %s", contrastive_audio_weights_path)
     checkpoint = torch.load(contrastive_audio_weights_path, map_location=torch.device("cpu"))
-    state_dict = checkpoint["model_video"] if isinstance(checkpoint, dict) and "model_video" in checkpoint else checkpoint
+    state_dict = (checkpoint.get("model_video") or checkpoint.get("online_encoder") or checkpoint) if isinstance(checkpoint, dict) else checkpoint
 
     target_sd = pooling_layer.state_dict()
     compatible = {}
@@ -654,7 +654,7 @@ class SoccerNetTransformerCaption(nn.Module):
             features_video = features_video.masked_fill(drop_video, 0.0)
 
         if (self.encoder.pool == "Transformer_Video"):
-            '''Get the cls token just for the video'''
+            '''Get the transformer attn out just for the video, prev imp'''
             features, encoder_out = self.encoder(video_feats = features_video)
         elif (self.encoder.pool == "Transformer_Audio"):
             '''get the cls token just for the audio'''
