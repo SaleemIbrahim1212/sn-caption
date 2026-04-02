@@ -234,11 +234,11 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
                 pool = getattr(getattr(_unwrap(model), "encoder", None), "pool", "")
                 feats_v, feats_a = _unpack_caption_batch_feats(feats_batch, pool, device)
                 # compute output
-                if hasattr(model, "encoder") and pool.startswith("Transformer_Video"):
+                if hasattr(_unwrap(model), "encoder") and pool.startswith("Transformer_Video"):
                     output = model(feats_v, None, caption, model_lengths)
-                elif hasattr(model, "encoder") and pool.startswith("Transformer_Audio"):
+                elif hasattr(_unwrap(model), "encoder") and pool.startswith("Transformer_Audio"):
                     output = model(None, feats_a, caption, model_lengths)
-                elif hasattr(model, "encoder") and pool == "Transformer":
+                elif hasattr(_unwrap(model), "encoder") and pool == "Transformer":
                     output = model(feats_v, feats_a, caption, model_lengths)
                 else:
                     output = model(feats_v, caption, model_lengths)
@@ -527,11 +527,11 @@ def validate_captioning(dataloader, model, model_name):
             pool = getattr(getattr(_unwrap(model), "encoder", None), "pool", "")
             feats_v, feats_a = _unpack_caption_batch_feats(feats_batch, pool, device)
             #compute output string
-            if hasattr(model, "encoder") and pool.startswith("Transformer_Video"):
+            if hasattr(_unwrap(model), "encoder") and pool.startswith("Transformer_Video"):
                 output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx], None).detach().cpu())) for idx in range(feats_v.shape[0])]
-            elif hasattr(model, "encoder") and pool.startswith("Transformer_Audio"):
+            elif hasattr(_unwrap(model), "encoder") and pool.startswith("Transformer_Audio"):
                 output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(None, feats_a[idx]).detach().cpu())) for idx in range(feats_a.shape[0])]
-            elif hasattr(model, "encoder") and pool == "Transformer":
+            elif hasattr(_unwrap(model), "encoder") and pool == "Transformer":
                 output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx], feats_a[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
 
             else:
@@ -585,11 +585,11 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
                 else:
                     feats_v, feats_a = x, None
 
-            if hasattr(model, "encoder") and pool.startswith("Transformer_Video"):
+            if hasattr(_unwrap(model), "encoder") and pool.startswith("Transformer_Video"):
                 output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx], None).detach().cpu())) for idx in range(feats_v.shape[0])]
-            elif hasattr(model, "encoder") and pool.startswith("Transformer_Audio"):
+            elif hasattr(_unwrap(model), "encoder") and pool.startswith("Transformer_Audio"):
                 output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(None, feats_a[idx]).detach().cpu())) for idx in range(feats_a.shape[0])]
-            elif hasattr(model, "encoder") and pool == "Transformer":
+            elif hasattr(_unwrap(model), "encoder") and pool == "Transformer":
                 output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx], feats_a[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
             else:
                 output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
