@@ -27,6 +27,11 @@ if caption_scorer is not None and hasattr(caption_scorer, "scorers"):
     caption_scorer.scorers = [s for s in caption_scorer.scorers if s[1] != "SPICE"]
 
 
+def _unwrap(model):
+    """Unwrap DataParallel to access the underlying module."""
+    return model.module if isinstance(model, torch.nn.DataParallel) else model
+
+
 def _unpack_caption_batch_feats(feats_batch, pool, device):
     """Map collated features to (video_tensor | None, audio_tensor | None)."""
     if pool == "Transformer_Audio":
@@ -78,7 +83,7 @@ def trainer(phase, train_loader,
     if os.path.exists(resume_path):
         logging.info(f"Resuming from checkpoint: {resume_path}")
         checkpoint = torch.load(resume_path, map_location=next(model.parameters()).device)
-        model.load_state_dict(checkpoint['state_dict'])
+        _unwrap(model).load_state_dict(checkpoint['state_dict'])
         if 'optimizer' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch = checkpoint.get('epoch', 0)
@@ -100,7 +105,7 @@ def trainer(phase, train_loader,
 
         state = {
             'epoch': epoch + 1,
-            'state_dict': model.state_dict(),
+            'state_dict': _unwrap(model).state_dict(),
             'best_loss': best_loss,
             'best_cider': best_cider,
             'best_meteor': best_meteor,
@@ -209,7 +214,7 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
                 #pack_padded_sequence to do less computation
                 target = pack_padded_sequence(target, lengths, batch_first=True, enforce_sorted=False)[0]
                 mask = pack_padded_sequence(mask[:, 1:], lengths, batch_first=True, enforce_sorted=False)[0]
-                pool = getattr(getattr(model, "encoder", None), "pool", "")
+                pool = getattr(getattr(_unwrap(model), "encoder", None), "pool", "")
                 feats_v, feats_a = _unpack_caption_batch_feats(feats_batch, pool, device)
                 # compute output
                 if hasattr(model, "encoder") and pool.startswith("Transformer_Video"):
@@ -496,18 +501,18 @@ def validate_captioning(dataloader, model, model_name):
         for (feats_batch, caption), lengths, mask, caption_or, cap_id in t:
             # measure data loading time
             data_time.update(time.time() - end)
-            pool = getattr(getattr(model, "encoder", None), "pool", "")
+            pool = getattr(getattr(_unwrap(model), "encoder", None), "pool", "")
             feats_v, feats_a = _unpack_caption_batch_feats(feats_batch, pool, device)
             #compute output string
             if hasattr(model, "encoder") and pool.startswith("Transformer_Video"):
-                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx], None).detach().cpu())) for idx in range(feats_v.shape[0])]
+                output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx], None).detach().cpu())) for idx in range(feats_v.shape[0])]
             elif hasattr(model, "encoder") and pool.startswith("Transformer_Audio"):
-                output = [dataloader.dataset.detokenize(list(model.sample(None, feats_a[idx]).detach().cpu())) for idx in range(feats_a.shape[0])]
+                output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(None, feats_a[idx]).detach().cpu())) for idx in range(feats_a.shape[0])]
             elif hasattr(model, "encoder") and pool == "Transformer":
-                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx], feats_a[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
+                output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx], feats_a[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
 
             else:
-                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
+                output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
             
             all_outputs.extend(output)
             all_labels.extend(caption_or)
@@ -540,7 +545,7 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
     output_folder = f"outputs/{split}"
     output_results = os.path.join("models", model_name, f"results_dense_captioning_{split}.zip")
 
-    pool = getattr(getattr(model, "encoder", None), "pool", "")
+    pool = getattr(getattr(_unwrap(model), "encoder", None), "pool", "")
     with tqdm(dataloader) as t:
         for batch_row in t:
             # measure data loading time
@@ -558,13 +563,13 @@ def test_captioning(dataloader, model, model_name, output_filename = "results_de
                     feats_v, feats_a = x, None
 
             if hasattr(model, "encoder") and pool.startswith("Transformer_Video"):
-                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx], None).detach().cpu())) for idx in range(feats_v.shape[0])]
+                output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx], None).detach().cpu())) for idx in range(feats_v.shape[0])]
             elif hasattr(model, "encoder") and pool.startswith("Transformer_Audio"):
-                output = [dataloader.dataset.detokenize(list(model.sample(None, feats_a[idx]).detach().cpu())) for idx in range(feats_a.shape[0])]
+                output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(None, feats_a[idx]).detach().cpu())) for idx in range(feats_a.shape[0])]
             elif hasattr(model, "encoder") and pool == "Transformer":
-                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx], feats_a[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
+                output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx], feats_a[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
             else:
-                output = [dataloader.dataset.detokenize(list(model.sample(feats_v[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
+                output = [dataloader.dataset.detokenize(list(_unwrap(model).sample(feats_v[idx]).detach().cpu())) for idx in range(feats_v.shape[0])]
             
             all_outputs.extend(output)
             all_index.extend([(i.item(), j.item()) for i, j in zip(game_id, cap_id)])

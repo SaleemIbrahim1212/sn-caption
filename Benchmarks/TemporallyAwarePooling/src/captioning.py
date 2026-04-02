@@ -130,13 +130,17 @@ def main(args):
                   audio_input_size=getattr(args, "audio_feature_dim", None)).to(device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
-                    window_size=args.window_size_caption, 
+                    window_size=args.window_size_caption,
                     vlad_k = args.vlad_k,
                     framerate=args.framerate,
                     pool=args.pool,
                     num_layers=args.num_layers,
                     teacher_forcing_ratio=args.teacher_forcing_ratio, word_dropout=args.word_dropout, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
-        
+
+    if torch.cuda.device_count() > 1:
+        logging.info(f"Using {torch.cuda.device_count()} GPUs via DataParallel")
+        model = torch.nn.DataParallel(model)
+
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -209,7 +213,7 @@ def main(args):
 
     # For the best model only
     checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=device)
-    model.load_state_dict(checkpoint['state_dict'])
+    (model.module if isinstance(model, torch.nn.DataParallel) else model).load_state_dict(checkpoint['state_dict'])
     model = model.to(device)
 
     # validate caption generation on groundtruth spots on multiple splits [test/challenge]
@@ -292,7 +296,7 @@ def dvc(args):
 
     # For the best model only
     checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=device)
-    model.load_state_dict(checkpoint['state_dict'])
+    (model.module if isinstance(model, torch.nn.DataParallel) else model).load_state_dict(checkpoint['state_dict'])
     model = model.to(device)
 
     # generate dense caption on multiple splits [test/challenge]
