@@ -208,11 +208,12 @@ def main(args):
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', verbose=True, patience=args.patience)
 
         # start training
-        trainer("caption", train_loader, val_loader, val_metric_loader, 
+        trainer("caption", train_loader, val_loader, val_metric_loader,
                 model, optimizer, scheduler, criterion,
                 model_name=args.model_name,
                 max_epochs=args.max_epochs, evaluation_frequency=args.evaluation_frequency,
-                log_every_n_batches=args.log_every_n_batches)
+                log_every_n_batches=args.log_every_n_batches,
+                warmup_epochs=args.warmup_epochs)
 
     # For the best model only
     checkpoint = torch.load(os.path.join("models", args.model_name, "caption","model.pth.tar"), map_location=device)
@@ -407,6 +408,7 @@ if __name__ == '__main__':
     parser.add_argument('--LR',       required=False, type=float,   default=1e-03, help='Learning Rate' )
     parser.add_argument('--LRe',       required=False, type=float,   default=1e-06, help='Learning Rate end' )
     parser.add_argument('--patience', required=False, type=int,   default=10,     help='Patience before reducing LR (ReduceLROnPlateau)' )
+    parser.add_argument('--warmup_epochs', required=False, type=int, default=0, help='Number of linear LR warmup epochs before ReduceLROnPlateau kicks in')
 
     parser.add_argument('--GPU',        required=False, type=int,   default=0,     help='ID of the GPU to use' )
     parser.add_argument('--device',     required=False, type=str,   default="cuda",   help='torch device (e.g., cpu, cuda, cuda:0)' )

@@ -75,7 +75,8 @@ def trainer(phase, train_loader,
             max_epochs=1000,
             evaluation_frequency=10,
             log_every_n_batches=50,
-            grad_clip_norm=1.0):
+            grad_clip_norm=1.0,
+            warmup_epochs=0):
 
     logging.info("start training")
 
@@ -83,6 +84,7 @@ def trainer(phase, train_loader,
     best_cider = float("-inf")
     best_meteor = float("-inf")
     start_epoch = 0
+    base_lrs = [pg['lr'] for pg in optimizer.param_groups]
 
     os.makedirs(os.path.join("models", model_name, phase), exist_ok=True)
 
@@ -108,8 +110,16 @@ def trainer(phase, train_loader,
         if 'scheduler' in checkpoint:
             scheduler.load_state_dict(checkpoint['scheduler'])
 
-    for epoch in range(start_epoch, max_epochs):  
-        #best_model_path = os.path.join("models", model_name, phase, "model.pth.tar")
+    for epoch in range(start_epoch, max_epochs):
+        # Linear warmup
+        if warmup_epochs > 0 and epoch < warmup_epochs:
+            scale = (epoch + 1) / warmup_epochs
+            for pg, base_lr in zip(optimizer.param_groups, base_lrs):
+                pg['lr'] = base_lr * scale
+        elif warmup_epochs > 0 and epoch == warmup_epochs:
+            for pg, base_lr in zip(optimizer.param_groups, base_lrs):
+                pg['lr'] = base_lr
+
         # train for one epoch
         loss_training = train(phase, train_loader, model, criterion,
                               optimizer, epoch + 1, train=True, log_every_n_batches=log_every_n_batches, grad_clip_norm=grad_clip_norm)
@@ -183,9 +193,10 @@ def trainer(phase, train_loader,
             if wandb.run is not None:
                 wandb.log({"modality/audio_scale": float(a_scale), "modality/video_scale": float(v_scale), "epoch": epoch})
 
-        # Reduce LR on Plateau after patience reached
+        # Reduce LR on Plateau after patience reached (skip during warmup)
         prevLR = optimizer.param_groups[0]['lr']
-        scheduler.step(loss_validation)
+        if epoch >= warmup_epochs:
+            scheduler.step(loss_validation)
         currLR = optimizer.param_groups[0]['lr']
         if (currLR is not prevLR and scheduler.num_bad_epochs == 0):
             logging.info("Plateau Reached!")
