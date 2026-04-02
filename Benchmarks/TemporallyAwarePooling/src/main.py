@@ -35,6 +35,7 @@ if __name__ == '__main__':
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )
     parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool for spotting and non-transformer captioning' )
     parser.add_argument('--transformer_modality', required=False, type=str, choices=["video", "audio", "both"], default="video", help='Transformer modality to run when --caption_type=Transformer' )
+    parser.add_argument('--dual_lstm_decoder', action='store_true', help='Use two LSTM decoders (audio/video) when --transformer_modality both')
     parser.add_argument('--vlad_k',       required=False, type=int,   default=64, help='Size of the vocabulary for NetVLAD' )
     parser.add_argument('--NMS_window',       required=False, type=int,   default=30, help='NMS window in second' )
     parser.add_argument('--NMS_threshold',       required=False, type=float,   default=0.0, help='NMS threshold for positive results' )

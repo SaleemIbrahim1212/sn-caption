@@ -93,6 +93,8 @@ def resolve_caption_feature_dims(args, dataset_Test):
 def main(args):
     device = resolve_device(args)
     caption_pool = resolve_caption_pool(args)
+    if getattr(args, "dual_lstm_decoder", False) and str(args.transformer_modality).strip().lower() != "both":
+        raise ValueError("--dual_lstm_decoder requires --transformer_modality both (multimodal Transformer encoder).")
 
     logging.info("Parameters:")
     for arg in vars(args):
@@ -122,7 +124,8 @@ def main(args):
                   contrastive_weights_path=args.contrastive_weights_path,
                   freeze_contrastive_encoder=args.freeze_contrastive_encoder,
                   unfreeze_contrastive_projection=args.unfreeze_contrastive_projection,
-                  audio_input_size=getattr(args, "audio_feature_dim", None)).to(device)
+                  audio_input_size=getattr(args, "audio_feature_dim", None),
+                  use_dual_lstm_decoder=getattr(args, "dual_lstm_decoder", False)).to(device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -243,6 +246,8 @@ def main(args):
 def dvc(args):
     device = resolve_device(args)
     caption_pool = resolve_caption_pool(args)
+    if getattr(args, "dual_lstm_decoder", False) and str(args.transformer_modality).strip().lower() != "both":
+        raise ValueError("--dual_lstm_decoder requires --transformer_modality both (multimodal Transformer encoder).")
 
     logging.info("Parameters:")
     for arg in vars(args):
@@ -267,7 +272,8 @@ def dvc(args):
                   contrastive_weights_path=args.contrastive_weights_path,
                   freeze_contrastive_encoder=args.freeze_contrastive_encoder,
                   unfreeze_contrastive_projection=args.unfreeze_contrastive_projection,
-                  audio_input_size=getattr(args, "audio_feature_dim", None)).to(device)
+                  audio_input_size=getattr(args, "audio_feature_dim", None),
+                  use_dual_lstm_decoder=getattr(args, "dual_lstm_decoder", False)).to(device)
     else: 
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
                     window_size=args.window_size_caption, 
@@ -363,6 +369,7 @@ if __name__ == '__main__':
     parser.add_argument('--window_size_caption', required=False, type=int,   default=45,     help='Size of the chunk (in seconds)' )
     parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool for non-transformer captioning' )
     parser.add_argument('--transformer_modality', required=False, type=str, choices=["video", "audio", "both"], default="video", help='Transformer modality to run when --caption_type=Transformer' )
+    parser.add_argument('--dual_lstm_decoder', action='store_true', help='Use two LSTM decoders (audio/video) when --transformer_modality both; default is one LSTM over fused features')
     parser.add_argument('--vlad_k',       required=False, type=int,   default=64, help='Size of the vocabulary for NetVLAD' )
     parser.add_argument('--min_freq',       required=False, type=int,   default=5, help='Minimum word frequency to the vocabulary for caption generation' )
     

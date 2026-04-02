@@ -80,6 +80,11 @@ Transformer caption modalities:
 - `audio`: audio memmap only (**`--master_audio_dir`** required). Contrastive checkpoint does **not** apply to the audio encoder.
 - `both`: video + audio memmaps; **`--master_audio_dir`** required; you may still pass **`--contrastive_weights_path`** for the **video** branch only.
 
+**Caption decoder (only when `--transformer_modality both`):**
+
+- Default: one LSTM decoder attends over the **fused** audio+video encoder output (concatenated pooled features and time-concatenated encoder states).
+- **`--dual_lstm_decoder`:** two separate LSTM decoders—one for audio, one for video—with modality-specific attention; logits are fused with a linear layer on the concatenated hidden states (same architecture as the `salma-two-lstms` branch). Requires **`--transformer_modality both`**; checkpoints are **not** interchangeable with the single-LSTM setup.
+
 Use Saleem’s `sbertcontrastive` checkpoint and the **45 @ 1 fps** memmap bundle for **video** runs.
 The parser defaults in `src/captioning.py` are set to match the "full working model" training recipe, so you can run with fewer flags.
 
@@ -115,6 +120,8 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py \
 
 Both memmaps loaded; fusion uses separate audio and video transformer encoders, then concatenates pooled representations for the caption decoder.
 
+**Single LSTM decoder (default):**
+
 ```powershell
 python Benchmarks/TemporallyAwarePooling/src/captioning.py \
   --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
@@ -125,6 +132,23 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py \
   --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
   --model_name transformer-av-caption \
   --transformer_modality both \
+  --GPU 0 \
+  --device cuda
+```
+
+**Dual LSTM decoders** (add **`--dual_lstm_decoder`**; use a distinct **`--model_name`** so checkpoints stay identifiable):
+
+```powershell
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio \
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
+  --model_name transformer-av-dual-lstm \
+  --transformer_modality both \
+  --dual_lstm_decoder \
   --GPU 0 \
   --device cuda
 ```
@@ -159,7 +183,7 @@ Current defaults for this transformer recipe (if not explicitly provided):
 
 ## Inference / Test-Only (Caption Side)
 
-Runs the caption pipeline in test-only mode with your saved model checkpoint. Keep the same `--window_size_caption`, `--framerate`, and data paths as training. For checkpoints trained with **`audio`** or **`both`**, add **`--transformer_modality`** and **`--master_audio_dir`** to match training.
+Runs the caption pipeline in test-only mode with your saved model checkpoint. Keep the same `--window_size_caption`, `--framerate`, and data paths as training. For checkpoints trained with **`audio`** or **`both`**, add **`--transformer_modality`** and **`--master_audio_dir`** to match training. For **`both`** runs, also match training on **`--dual_lstm_decoder`** (present vs omitted) or loading the checkpoint will fail or be wrong.
 
 ```powershell
 python Benchmarks/TemporallyAwarePooling/src/captioning.py \
@@ -198,6 +222,8 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py \
   - `--unfreeze_contrastive_projection` to unfreeze projection when encoder is frozen
 - Audio / multimodal memmap (required when `--transformer_modality` is `audio` or `both`):
   - `--master_audio_dir "C:/path/to/master_audio"` (directory must contain `audio_mapping.json` and `audio_features.dat`)
+- Multimodal caption decoder (only with `--transformer_modality both`):
+  - `--dual_lstm_decoder` — two LSTM decoders (audio + video) instead of one LSTM over fused features. Same flag exists on `src/main.py` if you use that entrypoint.
 
 ## Outputs
 
@@ -230,6 +256,10 @@ Dense caption prediction outputs:
   - Pass `--master_audio_dir` to the directory with `audio_mapping.json` and `audio_features.dat`, or use `--transformer_modality video` for video-only.
 - `Could not find the pretrained aggregator so skipping preload.`:
   - Verify `--contrastive_weights_path` points to the shared `sbertcontrastive` checkpoint from Saleem.
+- `--dual_lstm_decoder requires --transformer_modality both`:
+  - The dual decoder only applies to the multimodal (`both`) encoder. For video-only or audio-only, omit `--dual_lstm_decoder`.
+- Checkpoint load errors after changing decoder mode:
+  - Single-LSTM and dual-LSTM checkpoints use different decoder weights; keep **`--dual_lstm_decoder`** aligned with how the model was trained.
 
 ## Team Workflow Notes
 
