@@ -167,7 +167,10 @@ def main(args):
     if not args.test_only:
         criterion = torch.nn.CrossEntropyLoss(label_smoothing=0.1)
         if str(args.caption_type).strip().lower() == "transformer":
-            named_params = [(name, param) for name, param in model.named_parameters() if param.requires_grad]
+            named_params = [
+                (name[len("module."):] if name.startswith("module.") else name, param)
+                for name, param in model.named_parameters() if param.requires_grad
+            ]
             layer0_names = (
                 "encoder.pooling_layer.video_transformer.layers.0.",
             )
@@ -443,11 +446,11 @@ if __name__ == '__main__':
             logging.StreamHandler()
         ])
 
-    if args.GPU >= 0:
+    if args.GPU >= 0 and torch.cuda.device_count() == 1:
         os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
         os.environ["CUDA_VISIBLE_DEVICES"] = str(args.GPU)
     if args.device is None:
-        args.device = "cuda" if args.GPU >= 0 and torch.cuda.is_available() else "cpu"
+        args.device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
     start=time.time()
