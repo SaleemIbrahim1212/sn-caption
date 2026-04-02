@@ -49,6 +49,8 @@ class Transformer(nn.Module):
         self.video_transformer = nn.TransformerEncoder(video_layer, num_layers=video_num_layers)
         assert audio_d_model == video_d_model
         self.modality_embed = nn.Embedding(2, audio_d_model)
+        self.audio_scale = nn.Parameter(torch.ones(1))
+        self.video_scale = nn.Parameter(torch.ones(1))
 
     def forward(self, audio_feats, video_feats):
         batch_audio, _, _ = audio_feats.shape
@@ -71,7 +73,7 @@ class Transformer(nn.Module):
         x_v = x_v + self.modality_embed.weight[1].view(1, 1, -1)
         video_token = x_v.mean(dim=1)
 
-        encoder_seq = torch.cat([x_a, x_v], dim=1)
+        encoder_seq = torch.cat([x_a * self.audio_scale, x_v * self.video_scale], dim=1)
         return audio_token, video_token, encoder_seq
 
 

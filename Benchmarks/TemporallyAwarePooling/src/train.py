@@ -32,6 +32,17 @@ def _unwrap(model):
     return model.module if isinstance(model, torch.nn.DataParallel) else model
 
 
+def _get_modality_scales(model):
+    """Return (audio_scale, video_scale) if the encoder has them, else (None, None)."""
+    try:
+        pooling = _unwrap(model).encoder.pooling_layer
+        a = pooling.audio_scale.item()
+        v = pooling.video_scale.item()
+        return a, v
+    except AttributeError:
+        return None, None
+
+
 def _unpack_caption_batch_feats(feats_batch, pool, device):
     """Map collated features to (video_tensor | None, audio_tensor | None)."""
     if pool == "Transformer_Audio":
@@ -163,6 +174,12 @@ def trainer(phase, train_loader,
                 "epoch" : epoch,
                 })
 
+        a_scale, v_scale = _get_modality_scales(model)
+        if a_scale is not None and v_scale is not None:
+            logging.info(f"Epoch {epoch+1} modality scales: audio={a_scale:.4f} video={v_scale:.4f}")
+            if wandb.run is not None:
+                wandb.log({"modality/audio_scale": float(a_scale), "modality/video_scale": float(v_scale), "epoch": epoch})
+
         # Reduce LR on Plateau after patience reached
         prevLR = optimizer.param_groups[0]['lr']
         scheduler.step(loss_validation)
@@ -261,6 +278,9 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
                     max_mem = torch.cuda.max_memory_allocated() / (1024 ** 3)
                     msg += f" gpu_mem={mem:.2f}G max_gpu_mem={max_mem:.2f}G"
                 logging.info(msg)
+                a_scale, v_scale = _get_modality_scales(model)
+                if a_scale is not None:
+                    msg += f" audio_scale={a_scale:.4f} video_scale={v_scale:.4f}"
                 if wandb.run is not None:
                     log_payload = {
                         f"{phase}/batch_loss": float(loss.item()),
@@ -271,6 +291,9 @@ def train(phase, dataloader, model, criterion, optimizer, epoch, train=False, lo
                     }
                     if train and grad_l2_norm is not None:
                         log_payload[f"{phase}/grad_l2"] = float(grad_l2_norm)
+                    if a_scale is not None and v_scale is not None:
+                        log_payload["modality/audio_scale"] = float(a_scale)
+                        log_payload["modality/video_scale"] = float(v_scale)
                     wandb.log(log_payload)
 
             # measure elapsed time
