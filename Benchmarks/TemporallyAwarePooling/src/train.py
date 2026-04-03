@@ -111,7 +111,6 @@ def trainer(phase, train_loader,
             scheduler.load_state_dict(checkpoint['scheduler'])
 
     for epoch in range(start_epoch, max_epochs):
-        # Linear warmup
         if warmup_epochs > 0 and epoch < warmup_epochs:
             scale = (epoch + 1) / warmup_epochs
             for pg, base_lr in zip(optimizer.param_groups, base_lrs):
