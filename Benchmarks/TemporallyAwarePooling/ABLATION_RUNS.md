@@ -1,6 +1,6 @@
 # Captioning ablation: training and inference runs
 
-This document is **documentation only** for planning runs. Training still uses `src/captioning.py`; explainability uses `analysis/` (see `EXPLAINABILITY.md`).
+This document is **documentation only** for planning runs. Training uses `src/captioning.py`; reference/generated caption export uses `src/export_split_captions.py` (§8); explainability tooling uses `analysis/` (see `EXPLAINABILITY.md`).
 
 **Entry script (train / eval):** `Benchmarks/TemporallyAwarePooling/src/captioning.py`  
 **Best checkpoint (after training):** `models/<model_name>/caption/model.pth.tar`
@@ -324,7 +324,27 @@ When you run **without** `--test_only`, training ends by loading the best checkp
 For each `model_name`:
 
 - Metrics from validation (BLEU, METEOR, CIDEr, ROUGE-L, etc.) and W&B if used.
-- Optional: generated vs reference captions keyed by `(game_id, caption_id)`.
+- **Reference vs generated captions (for figures / external viz):** `captioning.py` inference computes generations for metrics but does not save them. Use **`src/export_split_captions.py`** to write the same `model.sample(...)` outputs to disk.
+
+**Default output directory:** `models/<model_name>/predictions/` (repo root). Override with `--out_dir`.
+
+**Example (transformer video, test split):**
+
+```text
+python Benchmarks/TemporallyAwarePooling/src/export_split_captions.py ^
+  --SoccerNet_path DATA ^
+  --features baidu_soccer_embeddings.npy ^
+  --mapping_json MAP ^
+  --feature_file FEAT ^
+  --model_name abl-A1-tfm-video ^
+  --caption_type Transformer ^
+  --transformer_modality video ^
+  --split test ^
+  --format json ^
+  --GPU 0
+```
+
+Use the **same** architecture and data flags as training (`--pool`, `--master_audio_dir`, `--dual_lstm_decoder`, contrastive flags, etc.) so the checkpoint loads. Each record includes `game_id`, `caption_id`, `game_name`, `reference_caption`, `generated_caption`. For JSONL, set `--format jsonl`.
 
 ---
 
@@ -337,19 +357,3 @@ For each `model_name`:
 | Contrastive init | **A4a** vs **A4b** | Matching `--test_only` commands |
 | Single fused vs dual LSTM | **A2** vs **A5** | **A2** / **A5** `--test_only` |
 
----
-
-## 10. Branch and training-loop caveats
-
-Some notes in this repo say `audio` or `both` may not be fully wired in `train.py`. Run a short job for **A2** / **A3** before large sweeps. Skip unsupported rows on your branch.
-
----
-
-## 11. Explainability (optional)
-
-After a checkpoint exists:
-
-- **Decoder** cross-attention: `analysis/explain_attention.py`
-- **Transformer encoder** self-attention (no `src/` edits): `analysis/explain_encoder_self_attention.py`
-
-See `EXPLAINABILITY.md` for commands and outputs.
