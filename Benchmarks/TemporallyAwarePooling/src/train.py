@@ -22,6 +22,20 @@ from torch.nn.utils.rnn import pack_padded_sequence
 import wandb
 
 caption_scorer = NLGEval(no_glove=True, no_skipthoughts=True) if NLGEval is not None else None
+
+
+def _wandb_save_checkpoint(path):
+    """Upload a checkpoint file to the active W&B run (Files tab / run artifacts)."""
+    if wandb.run is None:
+        return
+    if not os.path.isfile(path):
+        return
+    try:
+        wandb.save(path, policy="now")
+    except TypeError:
+        wandb.save(path)
+    except Exception as e:
+        logging.warning("wandb.save failed for %s: %s", path, e)
 if caption_scorer is not None and hasattr(caption_scorer, "scorers"):
     # Disable SPICE to avoid Java/CoreNLP dependency issues.
     caption_scorer.scorers = [s for s in caption_scorer.scorers if s[1] != "SPICE"]
@@ -119,6 +133,7 @@ def trainer(phase, train_loader,
         # Save the best model based on loss only if the evaluation frequency too long
         if is_better:
             torch.save(state, best_model_path)
+            _wandb_save_checkpoint(best_model_path)
 
         # Test the model on the validation set
         if epoch % evaluation_frequency == 0 and epoch != 0:
@@ -135,6 +150,7 @@ def trainer(phase, train_loader,
                     state['best_cider'] = best_cider
                     torch.save(state, best_cider_model_path)
                     logging.info(f"New best CIDEr at epoch {epoch + 1}: {best_cider:.4f}. Saved to {best_cider_model_path}")
+                    _wandb_save_checkpoint(best_cider_model_path)
             if phase == "caption" and "METEOR" in performance_validation:
                 meteor = float(performance_validation["METEOR"])
                 if meteor > best_meteor:
@@ -142,6 +158,7 @@ def trainer(phase, train_loader,
                     state['best_meteor'] = best_meteor
                     torch.save(state, best_meteor_model_path)
                     logging.info(f"New best METEOR at epoch {epoch + 1}: {best_meteor:.4f}. Saved to {best_meteor_model_path}")
+                    _wandb_save_checkpoint(best_meteor_model_path)
 
             logging.info("Validation performance at epoch " +
                          str(epoch+1) + " -> " + str(performance_validation))
