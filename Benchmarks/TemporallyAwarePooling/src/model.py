@@ -487,8 +487,20 @@ class Video2Caption(nn.Module):
                 for param in self.encoder.parameters():
                     param.requires_grad = False
 
+    def _attention_encoder_outputs(self, features):
+        """[B, H] pooled encoder output -> [B, T, 512] for DecoderRNN attention."""
+        B, H = features.shape[0], features.shape[1]
+        d = self.encoder.input_size
+        k = self.encoder.vlad_k
+        if H == d:
+            return features.unsqueeze(1)
+        if H == k * d:
+            return features.view(B, k, d)
+        return features.unsqueeze(1)
+
     def forward(self, features, captions, lengths):
         features = self.encoder(features)
+        enc_mem = self._attention_encoder_outputs(features)
         batch_size = captions.size(0)
         captions = captions[:, :-1]  # Remove last word in caption to use as input
         decoder_lengths = [max(int(length) - 1, 1) for length in lengths]
@@ -497,13 +509,13 @@ class Video2Caption(nn.Module):
             # Teacher forcing: Feed the target as the next input
             
             decoder_input = captions
-            decoder_output = self.decoder(features, decoder_input, decoder_lengths, features.unsqueeze(1))
+            decoder_output = self.decoder(features, decoder_input, decoder_lengths, enc_mem)
         else:
             features_extracted = self.decoder.ft_extactor_2(self.decoder.activation(self.decoder.dropout(self.decoder.ft_extactor_1(features))))
             features_extracted = torch.stack([features_extracted] * self.decoder.num_layers)
             states = (features_extracted, features_extracted)
             decoder_input = captions[:, 0].unsqueeze(1)  # <start> token
-            encoder_outputs = features.unsqueeze(1)
+            encoder_outputs = enc_mem
             decoder_output = torch.zeros(batch_size, captions.size(1), self.vocab_size, device=captions.device)
             for t in range(0, captions.size(1)):
                 word = self.decoder.embed(decoder_input).squeeze(1)
@@ -524,7 +536,8 @@ class Video2Caption(nn.Module):
 
     def sample(self, features, max_seq_length=70):
         features = self.encoder(features.unsqueeze(0))
-        return self.decoder.sample(features, max_seq_length)
+        enc_mem = self._attention_encoder_outputs(features)
+        return self.decoder.sample(features, enc_mem, max_seq_length)
 
 class SoccerNetTransformerCaption(nn.Module):
     """A transformer-based encoder-decoder model for generating captions of soccer events.
