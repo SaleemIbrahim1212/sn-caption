@@ -194,14 +194,26 @@ def _load_checkpoint(model, ckpt_path: Path, device, torch):
     model.eval()
 
 
+def _unwrap_singleton_clip_field(head):
+    """First field from SoccerNetCaptions may be (clip,) or the clip array itself."""
+    if isinstance(head, tuple):
+        if len(head) == 1:
+            return head[0]
+        raise ValueError(
+            f"Expected one clip as array or (array,); got a tuple of length {len(head)}. "
+            "For video+audio rows use --caption_type transformer and --transformer_modality both."
+        )
+    return head
+
+
 def _unpack_sample_row(row, caption_modality: str, np, torch):
     if caption_modality == "both":
         vfeats, afeats, _, _, _, _ = row
         return torch.as_tensor(np.asarray(vfeats, dtype=np.float32)), torch.as_tensor(np.asarray(afeats, dtype=np.float32))
     if caption_modality == "audio":
-        (afeats,), _, _, _, _ = row
+        afeats = _unwrap_singleton_clip_field(row[0])
         return None, torch.as_tensor(np.asarray(afeats, dtype=np.float32))
-    (vfeats,), _, _, _, _ = row
+    vfeats = _unwrap_singleton_clip_field(row[0])
     return torch.as_tensor(np.asarray(vfeats, dtype=np.float32)), None
 
 
