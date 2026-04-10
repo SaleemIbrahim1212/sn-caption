@@ -206,15 +206,20 @@ def _unwrap_singleton_clip_field(head):
     return head
 
 
+def _as_float_tensor(np, torch, arr):
+    """Copy memmap/read-only arrays so torch gets a writable tensor."""
+    return torch.as_tensor(np.asarray(arr, dtype=np.float32).copy())
+
+
 def _unpack_sample_row(row, caption_modality: str, np, torch):
     if caption_modality == "both":
         vfeats, afeats, _, _, _, _ = row
-        return torch.as_tensor(np.asarray(vfeats, dtype=np.float32)), torch.as_tensor(np.asarray(afeats, dtype=np.float32))
+        return _as_float_tensor(np, torch, vfeats), _as_float_tensor(np, torch, afeats)
     if caption_modality == "audio":
         afeats = _unwrap_singleton_clip_field(row[0])
-        return None, torch.as_tensor(np.asarray(afeats, dtype=np.float32))
+        return None, _as_float_tensor(np, torch, afeats)
     vfeats = _unwrap_singleton_clip_field(row[0])
-    return torch.as_tensor(np.asarray(vfeats, dtype=np.float32)), None
+    return _as_float_tensor(np, torch, vfeats), None
 
 
 def _tensor_list_to_jsonable(attn_list):

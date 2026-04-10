@@ -103,11 +103,11 @@ def greedy_decode_dual_modal_with_attention(
 
 
 def run_explain_baseline(model, feats_v: torch.Tensor, device: torch.device, max_len: int):
-    """Video2Caption: encoder then degenerate T=1 attention (matches teacher-forcing path)."""
+    """Video2Caption: same encoder memory as forward/sample (e.g. NetVLAD -> [B, k, 512])."""
     model.eval()
     with torch.no_grad():
         pooled = model.encoder(feats_v.unsqueeze(0).to(device))
-        enc = pooled.unsqueeze(1)
+        enc = model._attention_encoder_outputs(pooled)
         ids, attn = greedy_decode_decoder_rnn_with_attention(
             model.decoder, pooled, enc, max_seq_length=max_len, scale_dim=512
         )
