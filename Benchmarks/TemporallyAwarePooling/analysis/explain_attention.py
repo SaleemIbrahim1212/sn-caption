@@ -230,10 +230,13 @@ def _maybe_plot(payload: dict, out_path: Path, dual: bool):
     import matplotlib.pyplot as plt
     import numpy as np
 
+    ref = payload.get("reference_caption", "")
+    gen = payload.get("generated_caption", "")
+
     if dual:
         aa = np.array([np.array(x) for x in payload["attention_audio"]], dtype=float)
         av = np.array([np.array(x) for x in payload["attention_video"]], dtype=float)
-        fig, axes = plt.subplots(2, 1, figsize=(10, 6), sharex=False)
+        fig, axes = plt.subplots(2, 1, figsize=(10, 7), sharex=False)
         im0 = axes[0].imshow(aa, aspect="auto", cmap="viridis")
         axes[0].set_title("Decoder attention (audio stream)")
         axes[0].set_ylabel("decode step")
@@ -245,13 +248,18 @@ def _maybe_plot(payload: dict, out_path: Path, dual: bool):
         fig.colorbar(im1, ax=axes[1], fraction=0.02)
     else:
         att = np.array([np.array(x) for x in payload["attention"]], dtype=float)
-        fig, ax = plt.subplots(figsize=(10, 4))
+        fig, ax = plt.subplots(figsize=(10, 5))
         im = ax.imshow(att, aspect="auto", cmap="viridis")
         ax.set_title("Decoder attention over encoder time")
         ax.set_ylabel("decode step")
         ax.set_xlabel("encoder time index")
         fig.colorbar(im, ax=ax, fraction=0.02)
-    fig.tight_layout()
+
+    fig.subplots_adjust(top=0.88, bottom=0.14)
+    fig.text(0.5, 0.97, f"Generated: {gen}", ha="center", va="top", fontsize=9,
+             fontweight="bold", transform=fig.transFigure)
+    fig.text(0.5, 0.04, f"Reference: {ref}", ha="center", va="bottom", fontsize=9,
+             style="italic", transform=fig.transFigure)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 

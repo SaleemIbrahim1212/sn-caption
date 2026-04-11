@@ -83,21 +83,26 @@ def _maybe_plot_encoder(payload: dict, out_path: Path):
         ax.set_ylabel("query position")
         plt.colorbar(im, ax=ax, fraction=0.046)
 
+    ref = payload.get("reference_caption", "")
+
     has_v = payload.get("video") and payload["video"].get("layers")
     has_a = payload.get("audio") and payload["audio"].get("layers")
     if has_v and has_a:
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        fig, axes = plt.subplots(1, 2, figsize=(12, 6))
         one_heatmap(payload["video"]["layers"], "Video encoder (last layer)", axes[0])
         one_heatmap(payload["audio"]["layers"], "Audio encoder (last layer)", axes[1])
     elif has_v:
-        fig, ax = plt.subplots(figsize=(6, 5))
+        fig, ax = plt.subplots(figsize=(6, 6))
         one_heatmap(payload["video"]["layers"], "Video encoder (last layer)", ax)
     elif has_a:
-        fig, ax = plt.subplots(figsize=(6, 5))
+        fig, ax = plt.subplots(figsize=(6, 6))
         one_heatmap(payload["audio"]["layers"], "Audio encoder (last layer)", ax)
     else:
         return
-    fig.tight_layout()
+
+    fig.subplots_adjust(top=0.88, bottom=0.12)
+    fig.text(0.5, 0.04, f"Reference: {ref}", ha="center", va="bottom", fontsize=9,
+             style="italic", transform=fig.transFigure)
     fig.savefig(out_path, dpi=150)
     plt.close(fig)
 
