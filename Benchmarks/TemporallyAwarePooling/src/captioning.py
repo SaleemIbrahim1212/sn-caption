@@ -128,13 +128,14 @@ def main(args):
                   use_dual_lstm_decoder=getattr(args, "dual_lstm_decoder", False)).to(device)
     else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
-                    window_size=args.window_size_caption, 
-                    vlad_k = args.vlad_k,
+                    window_size=args.window_size_caption,
+                    vlad_k=args.vlad_k,
                     framerate=args.framerate,
                     pool=args.pool,
                     num_layers=args.num_layers,
-                    teacher_forcing_ratio=args.teacher_forcing_ratio, word_dropout=args.word_dropout, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder).to(device)
-        
+                    teacher_forcing_ratio=args.teacher_forcing_ratio, word_dropout=args.word_dropout, freeze_encoder=args.freeze_encoder, weights_encoder=args.weights_encoder,
+                    use_decoder_attention=getattr(args, "use_decoder_attention", True)).to(device)
+
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -274,14 +275,15 @@ def dvc(args):
                   unfreeze_contrastive_projection=args.unfreeze_contrastive_projection,
                   audio_input_size=getattr(args, "audio_feature_dim", None),
                   use_dual_lstm_decoder=getattr(args, "dual_lstm_decoder", False)).to(device)
-    else: 
+    else:
         model = Video2Caption(vocab_size=dataset_Test.vocab_size, weights=args.load_weights, input_size=args.feature_dim,
-                    window_size=args.window_size_caption, 
-                    vlad_k = args.vlad_k,
+                    window_size=args.window_size_caption,
+                    vlad_k=args.vlad_k,
                     framerate=args.framerate,
                     pool=args.pool,
                     num_layers=args.num_layers,
-                    teacher_forcing_ratio=args.teacher_forcing_ratio, word_dropout=args.word_dropout).to(device)
+                    teacher_forcing_ratio=args.teacher_forcing_ratio, word_dropout=args.word_dropout,
+                    use_decoder_attention=getattr(args, "use_decoder_attention", True)).to(device)
     logging.info(model)
     total_params = sum(p.numel()
                        for p in model.parameters() if p.requires_grad)
@@ -376,6 +378,9 @@ if __name__ == '__main__':
     parser.add_argument('--teacher_forcing_ratio',  required=False, type=valid_probability,   default=1.0, help='Teacher forcing ratio to use' )
     parser.add_argument('--word_dropout', required=False, type=valid_probability, default=0.01, help='Word dropout probability in decoder teacher forcing path')
     parser.add_argument('--num_layers',  required=False, type=int,   default=2, help='Teacher forcing ratio to use' )
+    parser.add_argument('--no_decoder_attention', dest='use_decoder_attention', action='store_false',
+                        help='Use plain LSTM decoder without attention (required for pre-attention checkpoints)')
+    parser.set_defaults(use_decoder_attention=True)
     parser.add_argument('--freeze_encoder',  required=False, type=bool, default=False)
     parser.add_argument('--pretrain',   required=False, action='store_true',  help='Perform testing only' )
     parser.add_argument('--weights_encoder',  required=False, type=str, default=None)

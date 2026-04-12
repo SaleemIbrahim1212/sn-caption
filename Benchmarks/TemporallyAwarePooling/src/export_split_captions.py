@@ -44,6 +44,9 @@ def _build_parser():
     p.add_argument("--pool", type=str, default="NetVLAD++")
     p.add_argument("--vlad_k", type=int, default=64)
     p.add_argument("--num_layers", type=int, default=2)
+    p.add_argument("--no_decoder_attention", dest="use_decoder_attention", action="store_false",
+                   help="Use plain LSTM decoder without attention (required for pre-attention checkpoints)")
+    p.set_defaults(use_decoder_attention=True)
     p.add_argument("--teacher_forcing_ratio", type=float, default=1.0)
     p.add_argument("--word_dropout", type=float, default=0.01)
     p.add_argument("--freeze_encoder", type=lambda x: str(x).lower() in ("1", "true", "yes"), default=False)
@@ -115,6 +118,7 @@ def _build_model(args, vocab_size: int, device, SoccerNetTransformerCaption, Vid
             word_dropout=args.word_dropout,
             freeze_encoder=args.freeze_encoder,
             weights_encoder=args.weights_encoder,
+            use_decoder_attention=getattr(args, "use_decoder_attention", True),
         ).to(device)
     return model
 

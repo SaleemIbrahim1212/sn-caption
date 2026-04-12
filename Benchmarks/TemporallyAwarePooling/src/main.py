@@ -56,6 +56,9 @@ if __name__ == '__main__':
     parser.add_argument('--unfreeze_contrastive_projection', action='store_true', help='When --freeze_contrastive_encoder is set, keep encoder.pooling_layer.video_proj trainable')
     parser.set_defaults(freeze_contrastive_encoder=False)
     parser.add_argument('--num_layers',  required=False, type=int, default=2)
+    parser.add_argument('--no_decoder_attention', dest='use_decoder_attention', action='store_false',
+                        help='Use plain LSTM decoder without attention (required for pre-attention checkpoints)')
+    parser.set_defaults(use_decoder_attention=True)
     
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )
