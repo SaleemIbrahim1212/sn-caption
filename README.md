@@ -7,9 +7,9 @@ This repository extends the [SoccerNet-Caption](https://github.com/SoccerNet/sn-
 We extend the original NetVLAD-based captioning baseline with a transformer encoder, multimodal audio-visual fusion, contrastive pretraining, and a  dual LSTM decoder with modality-specific cross-attention. Our best model achieves **CIDEr 21.18** vs the baseline **18.38** (~15% relative improvement) with fewer parameters
 
 
-<img width="807" height="770" alt="image" src="https://github.com/user-attachments/assets/95540a43-d253-4b66-8d13-2664e58240c5" />
+<img width="942" height="642" alt="image" src="https://github.com/user-attachments/assets/77c4fb0a-b420-41be-96d9-0f5cc9b49b91" />
 
-## Our Contributions
+## Our Contributions to this Contest 
 
 - **Transformer Encoder** — learned positional embeddings with stochastic positional dropout (rate=0.3), mean pooling over the temporal dimension
 - **Multimodal Fusion** — joint audio-visual transformer with modality embeddings, supporting Baidu Features
@@ -56,7 +56,7 @@ The task of Dense Video Captioning consists in generating engaging captions desc
 
 ## Acknowledgements
 
-- [SoccerNet](https://github.com/SoccerNet/sn-caption) team for the dataset, Baidu feature embeddings, and original baseline codebase (Mkhallati et al., 2023)
+- Thank you very much to [SoccerNet](https://github.com/SoccerNet/sn-caption) team for the dataset, Baidu feature embeddings, and original baseline codebase (Mkhallati et al., 2023)
 
 
 ## Presentation and Paper
