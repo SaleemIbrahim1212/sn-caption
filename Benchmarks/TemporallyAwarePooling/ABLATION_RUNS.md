@@ -71,6 +71,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A0-baseline-nvlad ^
   --caption_type Baseline ^
   --pool NetVLAD++ ^
+  --contrastive_weights_path CKPT ^
   --split_train train --split_valid valid --split_test test ^
   --GPU 0 --device cuda
 ```
@@ -86,6 +87,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A1-tfm-video ^
   --caption_type Transformer ^
   --transformer_modality video ^
+  --contrastive_weights_path CKPT ^
   --split_train train --split_valid valid --split_test test ^
   --GPU 0 --device cuda
 ```
@@ -102,6 +104,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A2-tfm-both ^
   --caption_type Transformer ^
   --transformer_modality both ^
+  --contrastive_weights_path CKPT ^
   --split_train train --split_valid valid --split_test test ^
   --GPU 0 --device cuda
 ```
@@ -118,6 +121,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A3-tfm-audio ^
   --caption_type Transformer ^
   --transformer_modality audio ^
+  --contrastive_weights_path CKPT ^
   --split_train train --split_valid valid --split_test test ^
   --GPU 0 --device cuda
 ```
@@ -172,6 +176,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A5-tfm-both-dual-lstm ^
   --caption_type Transformer ^
   --transformer_modality both ^
+  --contrastive_weights_path CKPT ^
   --dual_lstm_decoder ^
   --split_train train --split_valid valid --split_test test ^
   --GPU 0 --device cuda
@@ -194,6 +199,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A0-baseline-nvlad ^
   --caption_type Baseline ^
   --pool NetVLAD++ ^
+  --contrastive_weights_path CKPT ^
   --split_test test ^
   --test_only ^
   --GPU 0 --device cuda
@@ -210,6 +216,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A1-tfm-video ^
   --caption_type Transformer ^
   --transformer_modality video ^
+  --contrastive_weights_path CKPT ^
   --split_test test ^
   --test_only ^
   --GPU 0 --device cuda
@@ -227,6 +234,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A2-tfm-both ^
   --caption_type Transformer ^
   --transformer_modality both ^
+  --contrastive_weights_path CKPT ^
   --split_test test ^
   --test_only ^
   --GPU 0 --device cuda
@@ -244,6 +252,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A3-tfm-audio ^
   --caption_type Transformer ^
   --transformer_modality audio ^
+  --contrastive_weights_path CKPT ^
   --split_test test ^
   --test_only ^
   --GPU 0 --device cuda
@@ -297,6 +306,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A5-tfm-both-dual-lstm ^
   --caption_type Transformer ^
   --transformer_modality both ^
+  --contrastive_weights_path CKPT ^
   --dual_lstm_decoder ^
   --split_test test ^
   --test_only ^
