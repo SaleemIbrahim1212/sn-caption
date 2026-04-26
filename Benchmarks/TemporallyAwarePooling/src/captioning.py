@@ -377,12 +377,12 @@ if __name__ == '__main__':
     
     parser.add_argument('--teacher_forcing_ratio',  required=False, type=valid_probability,   default=1.0, help='Teacher forcing ratio to use' )
     parser.add_argument('--word_dropout', required=False, type=valid_probability, default=0.01, help='Word dropout probability in decoder teacher forcing path')
-    parser.add_argument('--num_layers',  required=False, type=int,   default=2, help='Teacher forcing ratio to use' )
+    parser.add_argument('--num_layers',  required=False, type=int,   default=2, help='Number of LSTM layers in the decoder' )
     parser.add_argument('--no_decoder_attention', dest='use_decoder_attention', action='store_false',
                         help='Use plain LSTM decoder without attention (required for pre-attention checkpoints)')
     parser.set_defaults(use_decoder_attention=True)
     parser.add_argument('--freeze_encoder',  required=False, type=bool, default=False)
-    parser.add_argument('--pretrain',   required=False, action='store_true',  help='Perform testing only' )
+    parser.add_argument('--pretrain',   required=False, action='store_true',  help='Run pretraining stage before main training' )
     parser.add_argument('--weights_encoder',  required=False, type=str, default=None)
     parser.add_argument('--contrastive_weights_path', required=False, type=str, default="/kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth", help='Path to contrastive encoder checkpoint to preload Transformer_Video')
     parser.add_argument('--freeze_contrastive_encoder', dest='freeze_contrastive_encoder', action='store_true', help='Freeze Transformer_Video encoder after loading --contrastive_weights_path')

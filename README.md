@@ -6,6 +6,8 @@ Participate in the 2024 edition of our Dense Video Captioning Challenge on our [
 
 This repository provides a first [Baseline](Benchmarks/TemporallyAwarePooling/) method and code for participants to get started.
 
+> **Running the code?** See [`Benchmarks/TemporallyAwarePooling/RUNNING_MODEL.md`](Benchmarks/TemporallyAwarePooling/RUNNING_MODEL.md) for the step-by-step guide used by this team, including transformer/audio training, memmap setup, and troubleshooting. The ablation run commands are documented in [`ABLATION_RUNS.md`](Benchmarks/TemporallyAwarePooling/ABLATION_RUNS.md).
+
 <p align="center"><img src="Images/logo-caption.jpg" width="640"></p>
 
 ### 2023 Challenge Leaderboard

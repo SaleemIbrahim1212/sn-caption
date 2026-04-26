@@ -1,6 +1,8 @@
 # Transformer Training Guide (Captioning)
 
-This file documents how to run transformer-based caption training in this benchmark
+> **Note: This file is partially outdated.** Audio and multimodal (`both`) training are now implemented. The section below describing them as "not implemented" no longer applies. Refer to [`RUNNING_MODEL.md`](RUNNING_MODEL.md) and [`ABLATION_RUNS.md`](ABLATION_RUNS.md) for the current, authoritative training guide and all run commands.
+
+This file documents how to run transformer-based caption training in this benchmark.
 
 ## What's new and what this runs
 
@@ -13,10 +15,8 @@ This file documents how to run transformer-based caption training in this benchm
 ## Current Support Status
 
 - `video`: supported for training.
-- `audio`: not implemented in training loop yet.
-- `both`: not implemented in training loop yet.
-
-If you set `audio` or `both`, training will hit `NotImplementedError` in `src/train.py`.
+- `audio`: supported for training (requires `--master_audio_dir`).
+- `both`: supported for training (requires `--master_audio_dir`).
 
 ## Prerequisites
 

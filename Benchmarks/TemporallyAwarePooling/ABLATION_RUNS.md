@@ -1,6 +1,6 @@
 # Captioning ablation: training and inference runs
 
-This document is **documentation only** for planning runs. Training uses `src/captioning.py`; reference/generated caption export uses `src/export_split_captions.py` (§8); explainability tooling uses `analysis/` (see `EXPLAINABILITY.md`).
+This document is **documentation only** for planning runs. Training uses `src/captioning.py`; reference/generated caption export uses `src/export_split_captions.py` (§8).
 
 **Entry script (train / eval):** `Benchmarks/TemporallyAwarePooling/src/captioning.py`  
 **Best checkpoint (after training):** `models/<model_name>/caption/model.pth.tar`
