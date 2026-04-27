@@ -50,8 +50,7 @@ Audio or multimodal runs require `--master_audio_dir` pointing at a directory th
 | **A1** | Transformer, video only |
 | **A2** | Transformer, video + audio |
 | **A3** | Transformer, audio only |
-| **A4a** | Transformer video + contrastive init (real `--contrastive_weights_path`) |
-| **A4b** | Transformer video, no contrastive init (missing path skips load; see command) |
+| **A4** | Transformer video, no contrastive init (missing path skips load; see command) |
 | **A5** | Same as **A2** + `--dual_lstm_decoder` |
 
 ---
@@ -71,7 +70,6 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A0-baseline-nvlad ^
   --caption_type Baseline ^
   --pool NetVLAD++ ^
-  --contrastive_weights_path CKPT ^
   --split_train train --split_valid valid --split_test test ^
   --GPU 0 --device cuda
 ```
@@ -126,27 +124,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --GPU 0 --device cuda
 ```
 
-### A4a — Transformer video + contrastive checkpoint (train)
-
-```text
-python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
-  --SoccerNet_path DATA ^
-  --features baidu_soccer_embeddings.npy ^
-  --mapping_json MAP ^
-  --feature_file FEAT ^
-  --model_name abl-A4a-tfm-video-contrastive ^
-  --caption_type Transformer ^
-  --transformer_modality video ^
-  --contrastive_weights_path CKPT ^
-  --freeze_contrastive_encoder ^
-  --unfreeze_contrastive_projection ^
-  --split_train train --split_valid valid --split_test test ^
-  --GPU 0 --device cuda
-```
-
-Use `--no_freeze_contrastive_encoder` or `--no_unfreeze_contrastive_projection` as needed for sub-ablations.
-
-### A4b — Transformer video, skip contrastive load (train)
+### A4 — Transformer video, skip contrastive load (train)
 
 `load_contrastive_video_weights` skips if the file is missing. Pointing to a non-existent path avoids editing code:
 
@@ -199,7 +177,6 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A0-baseline-nvlad ^
   --caption_type Baseline ^
   --pool NetVLAD++ ^
-  --contrastive_weights_path CKPT ^
   --split_test test ^
   --test_only ^
   --GPU 0 --device cuda
@@ -258,26 +235,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --GPU 0 --device cuda
 ```
 
-### A4a — Same as training contrastive flags (inference only)
-
-```text
-python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
-  --SoccerNet_path DATA ^
-  --features baidu_soccer_embeddings.npy ^
-  --mapping_json MAP ^
-  --feature_file FEAT ^
-  --model_name abl-A4a-tfm-video-contrastive ^
-  --caption_type Transformer ^
-  --transformer_modality video ^
-  --contrastive_weights_path CKPT ^
-  --freeze_contrastive_encoder ^
-  --unfreeze_contrastive_projection ^
-  --split_test test ^
-  --test_only ^
-  --GPU 0 --device cuda
-```
-
-### A4b — No contrastive file (inference only)
+### A4 — No contrastive file (inference only)
 
 ```text
 python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
@@ -364,6 +322,6 @@ Use the **same** architecture and data flags as training (`--pool`, `--master_au
 |----------|----------------|-----------|
 | Pooling vs temporal transformer | **A0** vs **A1** | **A0** / **A1** `--test_only` on same `--split_test` |
 | Adding audio | **A1** vs **A2** | **A1** / **A2** `--test_only` |
-| Contrastive init | **A4a** vs **A4b** | Matching `--test_only` commands |
+| Contrastive init | **A1** vs **A4** | Matching `--test_only` commands |
 | Single fused vs dual LSTM | **A2** vs **A5** | **A2** / **A5** `--test_only` |
 
