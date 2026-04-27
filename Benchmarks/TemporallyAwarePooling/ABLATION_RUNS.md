@@ -70,6 +70,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A0-baseline-nvlad ^
   --caption_type Baseline ^
   --pool NetVLAD++ ^
+  --no_decoder_attention ^
   --split_train train --split_valid valid --split_test test ^
   --GPU 0 --device cuda
 ```
@@ -177,6 +178,7 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py ^
   --model_name abl-A0-baseline-nvlad ^
   --caption_type Baseline ^
   --pool NetVLAD++ ^
+  --no_decoder_attention ^
   --split_test test ^
   --test_only ^
   --GPU 0 --device cuda
