@@ -31,10 +31,11 @@ if __name__ == '__main__':
 
     parser.add_argument('--version', required=False, type=int,   default=2,     help='Version of the dataset' )
     parser.add_argument('--feature_dim', required=False, type=int,   default=None,     help='Number of input features' )
-    parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Number of chunks per epoch' )
+    parser.add_argument('--evaluation_frequency', required=False, type=int,   default=10,     help='Run full validation metrics every N epochs (epoch 0 skipped)' )
     parser.add_argument('--framerate', required=False, type=int,   default=2,     help='Framerate of the input features' )
     parser.add_argument('--pool',       required=False, type=str,   default="NetVLAD++", help='How to pool for spotting and non-transformer captioning' )
     parser.add_argument('--transformer_modality', required=False, type=str, choices=["video", "audio", "both"], default="video", help='Transformer modality to run when --caption_type=Transformer' )
+    parser.add_argument('--dual_lstm_decoder', action='store_true', help='Use two LSTM decoders (audio/video) when --transformer_modality both')
     parser.add_argument('--vlad_k',       required=False, type=int,   default=64, help='Size of the vocabulary for NetVLAD' )
     parser.add_argument('--NMS_window',       required=False, type=int,   default=30, help='NMS window in second' )
     parser.add_argument('--NMS_threshold',       required=False, type=float,   default=0.0, help='NMS threshold for positive results' )
@@ -55,6 +56,9 @@ if __name__ == '__main__':
     parser.add_argument('--unfreeze_contrastive_projection', action='store_true', help='When --freeze_contrastive_encoder is set, keep encoder.pooling_layer.video_proj trainable')
     parser.set_defaults(freeze_contrastive_encoder=False)
     parser.add_argument('--num_layers',  required=False, type=int, default=2)
+    parser.add_argument('--no_decoder_attention', dest='use_decoder_attention', action='store_false',
+                        help='Use plain LSTM decoder without attention (required for pre-attention checkpoints)')
+    parser.set_defaults(use_decoder_attention=True)
     
 
     parser.add_argument('--batch_size', required=False, type=int,   default=256,     help='Batch size' )

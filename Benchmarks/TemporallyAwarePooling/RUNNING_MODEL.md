@@ -8,6 +8,9 @@ This is the main runbook for the caption-side workflow on this benchmark branch.
 - Primary entrypoint: `Benchmarks/TemporallyAwarePooling/src/captioning.py`.
 - The team workflow here does not use `src/main.py`.
 
+> **All training and experiments were run on Kaggle.** The full notebook (including results) is available at:
+> [Crowd Audio-Guided Transformer Captioning for SoccerNet](https://www.kaggle.com/code/chidiebereekeke/crowd-audio-guided-transformer-captioning-for-socc)
+
 ## Prerequisites
 
 - Python 3.8 environment.
@@ -34,6 +37,7 @@ You need:
 - Mapping and memmap files used by the caption dataset (for the **45 @ 1 fps** dense pipeline, paths will look like a folder containing `mapping.json` and `features.dat`):
   - `--mapping_json` → path to `mapping.json`
   - `--feature_file` → path to `features.dat`
+- **Audio transformer (`--transformer_modality audio` or `both`):** a directory (single extra flag) passed as **`--master_audio_dir`**, containing **`audio_mapping.json`** and **`audio_features.dat`**. Build them with repo-root `build_audio_embedding_memmap.py` (or your existing pipeline). Video `mapping.json` / `features.dat` are still required so the dataset can align games and labels; audio-only training still opens the video memmap.
 
 **Transformer + `sbertcontrastive`:** clip length in frames must match the checkpoint and memmap. Use **`--window_size_caption 45`** and **`--framerate 1`** so `window_size_caption × framerate = 45`.
 
@@ -48,7 +52,7 @@ Defaults for mapping/memmap (if files sit in the current working directory):
 
 Run commands from repository root.
 
-Windows (PowerShell) examples below use backtick line continuation and are written from repo root.
+Command examples below use backslash line continuation (bash/zsh) and are written from repo root.
 
 ## Training (Baseline Caption Model)
 
@@ -59,66 +63,147 @@ This uses default training values unless you override them:
 - `evaluation_frequency=10`
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py `
-  --SoccerNet_path "C:/path/to/SoccerNet" `
-  --features baidu_soccer_embeddings.npy `
-  --mapping_json mapping.json `
-  --feature_file features.dat `
-  --model_name baseline-caption `
-  --caption_type Baseline `
-  --pool NetVLAD++ `
-  --GPU 0 `
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path "C:/path/to/SoccerNet" \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json mapping.json \
+  --feature_file features.dat \
+  --model_name baseline-caption \
+  --caption_type Baseline \
+  --pool NetVLAD++ \
+  --GPU 0 \
   --device cuda
 ```
 
 ## Training (Transformer Video Caption Model)
 
-Current support status for caption transformer:
+Transformer caption modalities:
 
-- `video`: implemented
-- `audio`: not implemented in training path
-- `both`: not implemented in training path
+- `video`: video memmap only; optional **`--contrastive_weights_path`** preloads `Transformer_Video` from Saleem’s `sbertcontrastive` checkpoint.
+- `audio`: audio memmap only (**`--master_audio_dir`** required). Contrastive checkpoint does **not** apply to the audio encoder.
+- `both`: video + audio memmaps; **`--master_audio_dir`** required; you may still pass **`--contrastive_weights_path`** for the **video** branch only.
 
-Use Saleem’s `sbertcontrastive` checkpoint and the **45 @ 1 fps** memmap bundle. Replace paths below with your local locations.
+**Caption decoder (only when `--transformer_modality both`):**
+
+- Default: one LSTM decoder attends over the **fused** audio+video encoder output (concatenated pooled features and time-concatenated encoder states).
+- **`--dual_lstm_decoder`:** two separate LSTM decoders—one for audio, one for video—with modality-specific attention; logits are fused with a linear layer on the concatenated hidden states (same architecture as the `salma-two-lstms` branch). Requires **`--transformer_modality both`**; checkpoints are **not** interchangeable with the single-LSTM setup.
+
+Use Saleem’s `sbertcontrastive` checkpoint and the **45 @ 1 fps** memmap bundle for **video** runs.
+The parser defaults in `src/captioning.py` are set to match the "full working model" training recipe, so you can run with fewer flags.
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py `
-  --SoccerNet_path "C:/path/to/SoccerNet" `
-  --features baidu_soccer_embeddings.npy `
-  --mapping_json "C:/path/to/soccernet-densefile-at-45-1fps/mapping.json" `
-  --feature_file "C:/path/to/soccernet-densefile-at-45-1fps/features.dat" `
-  --model_name transformer-video-caption `
-  --caption_type Transformer `
-  --transformer_modality video `
-  --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" `
-  --freeze_contrastive_encoder `
-  --pool NetVLAD `
-  --GPU 0 `
-  --window_size_caption 45 `
-  --framerate 1 `
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
+  --model_name NetVLAD-Transformer-memapfixed \
+  --transformer_modality video
+```
+
+## Training (Transformer Audio Caption Model)
+
+Same windowing as video (**`--window_size_caption 45`** and **`--framerate 1`**) so clips stay aligned. Set **`--master_audio_dir`** to the folder that contains `audio_mapping.json` and `audio_features.dat`.
+
+```powershell
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio \
+  --model_name transformer-audio-caption \
+  --transformer_modality audio \
+  --GPU 0 \
   --device cuda
 ```
 
-## Inference / Test-Only (Caption Side)
+## Training (Transformer Video + Audio)
 
-Runs the caption pipeline in test-only mode with your saved model checkpoint. Keep the same `--window_size_caption`, `--framerate`, and data paths as training.
+Both memmaps loaded; fusion uses separate audio and video transformer encoders, then concatenates pooled representations for the caption decoder.
+
+**Single LSTM decoder (default):**
 
 ```powershell
-python Benchmarks/TemporallyAwarePooling/src/captioning.py `
-  --SoccerNet_path "C:/path/to/SoccerNet" `
-  --features baidu_soccer_embeddings.npy `
-  --mapping_json "C:/path/to/soccernet-densefile-at-45-1fps/mapping.json" `
-  --feature_file "C:/path/to/soccernet-densefile-at-45-1fps/features.dat" `
-  --model_name transformer-video-caption `
-  --caption_type Transformer `
-  --transformer_modality video `
-  --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" `
-  --freeze_contrastive_encoder `
-  --pool NetVLAD `
-  --GPU 0 `
-  --window_size_caption 45 `
-  --framerate 1 `
-  --test_only `
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio \
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
+  --model_name transformer-av-caption \
+  --transformer_modality both \
+  --GPU 0 \
+  --device cuda
+```
+
+**Dual LSTM decoders** (add **`--dual_lstm_decoder`**; use a distinct **`--model_name`** so checkpoints stay identifiable):
+
+```powershell
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json \
+  --feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat \
+  --master_audio_dir /kaggle/input/datasets/salzeem/master_audio \
+  --contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth \
+  --model_name transformer-av-dual-lstm \
+  --transformer_modality both \
+  --dual_lstm_decoder \
+  --GPU 0 \
+  --device cuda
+```
+
+Current defaults for this transformer recipe (if not explicitly provided):
+
+- `--SoccerNet_path /kaggle/input/datasets/salzeem/soccernet/data`
+- `--features baidu_soccer_embeddings.npy`
+- `--mapping_json /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/mapping.json`
+- `--feature_file /kaggle/input/datasets/salzeem/soccernet-densefile-at-45-1fps/features.dat`
+- `--model_name NetVLAD-Transformer-memapfixed`
+- `--caption_type Transformer`
+- `--transformer_modality video`
+- `--contrastive_weights_path /kaggle/input/models/salzeem/sbertcontrastive/pytorch/default/1/best.pth`
+- `--freeze_contrastive_encoder` (enabled by default)
+- `--unfreeze_contrastive_projection` (enabled by default)
+- `--teacher_forcing_ratio 1.0`
+- `--window_size_caption 45`
+- `--word_dropout 0.01`
+- `--framerate 1`
+- `--max_epochs 100`
+- `--evaluation_frequency 1`
+- `--log_every_n_batches 20`
+- `--max_num_worker 2`
+- `--num_layers 2`
+- `--split_train train`
+- `--split_valid valid`
+- `--split_test test`
+- `--GPU 0`
+- `--device cuda`
+- `--loglevel INFO`
+
+## Inference / Test-Only (Caption Side)
+
+Runs the caption pipeline in test-only mode with your saved model checkpoint. Keep the same `--window_size_caption`, `--framerate`, and data paths as training. For checkpoints trained with **`audio`** or **`both`**, add **`--transformer_modality`** and **`--master_audio_dir`** to match training. For **`both`** runs, also match training on **`--dual_lstm_decoder`** (present vs omitted) or loading the checkpoint will fail or be wrong.
+
+```powershell
+python Benchmarks/TemporallyAwarePooling/src/captioning.py \
+  --SoccerNet_path "C:/path/to/SoccerNet" \
+  --features baidu_soccer_embeddings.npy \
+  --mapping_json "C:/path/to/soccernet-densefile-at-45-1fps/mapping.json" \
+  --feature_file "C:/path/to/soccernet-densefile-at-45-1fps/features.dat" \
+  --model_name transformer-video-caption \
+  --caption_type Transformer \
+  --transformer_modality video \
+  --contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth" \
+  --freeze_contrastive_encoder \
+  --pool NetVLAD \
+  --GPU 0 \
+  --window_size_caption 45 \
+  --framerate 1 \
+  --test_only \
   --device cuda
 ```
 
@@ -127,17 +212,21 @@ python Benchmarks/TemporallyAwarePooling/src/captioning.py `
 - Splits:
   - `--split_train train`
   - `--split_valid valid`
-  - `--split_test test challenge`
+  - `--split_test test`
 - Reproducibility:
   - `--seed 0`
 - Logging:
   - `--loglevel INFO`
   - `--log_every_n_batches 50`
-- Contrastive preload:
+- Contrastive preload (video transformer branch only):
   - `--contrastive_weights_path "C:/path/to/sbertcontrastive/best.pth"`
   - `--freeze_contrastive_encoder` to keep pretrained encoder frozen
   - `--no_freeze_contrastive_encoder` to fine-tune encoder
   - `--unfreeze_contrastive_projection` to unfreeze projection when encoder is frozen
+- Audio / multimodal memmap (required when `--transformer_modality` is `audio` or `both`):
+  - `--master_audio_dir "C:/path/to/master_audio"` (directory must contain `audio_mapping.json` and `audio_features.dat`)
+- Multimodal caption decoder (only with `--transformer_modality both`):
+  - `--dual_lstm_decoder` — two LSTM decoders (audio + video) instead of one LSTM over fused features. Same flag exists on `src/main.py` if you use that entrypoint.
 
 ## Outputs
 
@@ -166,10 +255,14 @@ Dense caption prediction outputs:
   - Confirm `features.dat` is the expected file for the selected mapping/features.
 - `Skipping caption validation: ...`:
   - Install the optional NLG evaluation dependencies for full caption metrics.
-- `NotImplementedError` with transformer modality:
-  - Use `--transformer_modality video` for current training/inference support.
+- `Set --master_audio_dir ...` when using audio or both:
+  - Pass `--master_audio_dir` to the directory with `audio_mapping.json` and `audio_features.dat`, or use `--transformer_modality video` for video-only.
 - `Could not find the pretrained aggregator so skipping preload.`:
   - Verify `--contrastive_weights_path` points to the shared `sbertcontrastive` checkpoint from Saleem.
+- `--dual_lstm_decoder requires --transformer_modality both`:
+  - The dual decoder only applies to the multimodal (`both`) encoder. For video-only or audio-only, omit `--dual_lstm_decoder`.
+- Checkpoint load errors after changing decoder mode:
+  - Single-LSTM and dual-LSTM checkpoints use different decoder weights; keep **`--dual_lstm_decoder`** aligned with how the model was trained.
 
 ## Team Workflow Notes
 

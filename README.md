@@ -6,6 +6,11 @@ This repository extends the [SoccerNet-Caption](https://github.com/SoccerNet/sn-
 
 We extend the original NetVLAD-based captioning baseline with a transformer encoder, multimodal audio-visual fusion, contrastive pretraining, and a  dual LSTM decoder with modality-specific cross-attention. Our best model achieves **CIDEr 21.18** vs the baseline **18.38** (~15% relative improvement) with fewer parameters
 
+> **Running the code?** See [`Benchmarks/TemporallyAwarePooling/RUNNING_MODEL.md`](Benchmarks/TemporallyAwarePooling/RUNNING_MODEL.md) for the step-by-step guide used by this team, including transformer/audio training, memmap setup, and troubleshooting. The ablation run commands are documented in [`ABLATION_RUNS.md`](Benchmarks/TemporallyAwarePooling/ABLATION_RUNS.md).
+>
+> **Experiments & training runs:** All training and experiments for this work were conducted on Kaggle. The full notebook is available here: [Crowd Audio-Guided Transformer Captioning for SoccerNet](https://www.kaggle.com/code/chidiebereekeke/crowd-audio-guided-transformer-captioning-for-socc).
+
+<p align="center"><img src="Images/logo-caption.jpg" width="640"></p>
 
 <img width="942" height="642" alt="image" src="https://github.com/user-attachments/assets/77c4fb0a-b420-41be-96d9-0f5cc9b49b91" />
 
