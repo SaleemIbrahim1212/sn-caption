@@ -8,6 +8,9 @@ This is the main runbook for the caption-side workflow on this benchmark branch.
 - Primary entrypoint: `Benchmarks/TemporallyAwarePooling/src/captioning.py`.
 - The team workflow here does not use `src/main.py`.
 
+> **All training and experiments were run on Kaggle.** The full notebook (including results) is available at:
+> [Crowd Audio-Guided Transformer Captioning for SoccerNet](https://www.kaggle.com/code/chidiebereekeke/crowd-audio-guided-transformer-captioning-for-socc)
+
 ## Prerequisites
 
 - Python 3.8 environment.
